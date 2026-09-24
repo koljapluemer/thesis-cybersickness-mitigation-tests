@@ -115,10 +115,12 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 2):
+(`SessionLog`, format version 3):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
-- `turnCues`: the `turn-cues` configuration (condition) of the session.
+- `condition`: the experimental condition id (see `conditions.md`). It is
+  locked while recording, so there is one per log.
+- `turnCues`: the effective `turn-cues` configuration under that condition.
 - `scene`: landscape glTF path and world matrix, `tour-flight` settings.
   Together with the per-frame poses, this is enough to re-render every frame
   offline.

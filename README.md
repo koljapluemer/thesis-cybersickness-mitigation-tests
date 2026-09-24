@@ -17,13 +17,16 @@ head-locked HUD rotation indicators have since been removed.
 
 | File | Role |
 |---|---|
-| `src/main.ts` | Scene markup and wiring of the flow recorder and its button. |
+| `src/main.ts` | Scene markup and wiring of the flow recorder, its button and the condition select. |
 | `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path. |
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
 | `src/turn-cues/` | Turn cues (`turn-cues` A-Frame system): turn rate from the live rig-induced flow → detector → left/right stereo tone. See `doc/turn-cues.md`. |
+| `src/conditions/` | Experimental conditions (`condition` A-Frame system): registry of conditions, each configuring every mitigation system, plus the DOM select and the VR controller cycling to switch them. See `doc/conditions.md`. |
+| `src/audio/` | `audio` A-Frame system: the scene's shared, gesture-unlocked `AudioContext`. |
 | `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
 | `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
-| `doc/turn-cues.md` | Turn cue pipeline, configuration (experimental conditions) and audio unlock. |
+| `doc/turn-cues.md` | Turn cue pipeline, configuration and audio unlock. |
+| `doc/conditions.md` | Experimental conditions: architecture, switching, adding conditions and mitigations. |
 | `analysis/` | uv project; `replay_session.py` replays a session log offline and validates the live flow measurement. |
 | `src/style.css` | Fullscreen layout reset for the embedded `<a-scene>`. |
 | `index.html` | Entry point, mounts the scene into `#app`, loads a GoatCounter analytics beacon. |
@@ -55,8 +58,12 @@ head-locked HUD rotation indicators have since been removed.
   Details: `doc/optical-flow.md`.
 - **`turn-cues` system** (configured on `<a-scene>`) — detects turns from the
   live rig-induced flow and plays an 800 Hz tone on the left or right channel.
-  Source and output are configurable, which is how experimental conditions
-  are set. Details: `doc/turn-cues.md`.
+  Configured by the selected condition. Details: `doc/turn-cues.md`.
+- **`condition` system** (`condition="…"` on `<a-scene>`) — the experimental
+  condition (No Mitigation, Turn Tones), switchable with the select in the
+  bottom-left corner or, in VR, cycled with B on the right controller. Locked
+  while recording.
+  Details: `doc/conditions.md`.
 
 ## Running
 

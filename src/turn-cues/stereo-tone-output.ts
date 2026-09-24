@@ -1,4 +1,4 @@
-import type { Scene } from 'aframe';
+import type { AudioSystem } from '../audio/audio-system';
 import type { CueOutput, TurnDirection } from './types';
 
 export type StereoToneOptions = {
@@ -10,53 +10,26 @@ export type StereoToneOptions = {
   gain: number;
 };
 
-const UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'] as const;
-
 /**
  * A sine tone on the left or right channel only. Plain head-locked stereo,
  * deliberately not A-Frame's `sound` / three's `PositionalAudio`, which would
- * anchor the sound in the world.
- *
- * Browsers only let audio start from a user gesture, so the `AudioContext` is
- * created and resumed from the first pointer/key event on the page, from
- * entering VR, or from a controller `select` in VR, and re-armed whenever it
- * gets suspended or interrupted. Until then cues are not presented.
+ * anchor the sound in the world. Plays through the shared `audio` system's
+ * context; while that is still locked, cues are not presented.
  */
 export class StereoToneOutput implements CueOutput {
-  private readonly sceneEl: Scene;
+  private readonly audio: AudioSystem;
   private readonly options: StereoToneOptions;
-  private context: AudioContext | null = null;
-  private xrSession: XRSession | null = null;
-  private readonly unlock = () => this.resume();
-  private readonly onEnterVr = () => {
-    this.xrSession = this.sceneEl.renderer.xr.getSession();
-    this.xrSession?.addEventListener('select', this.unlock);
-    this.resume();
-  };
-  private readonly onExitVr = () => {
-    this.xrSession?.removeEventListener('select', this.unlock);
-    this.xrSession = null;
-  };
-  private readonly onStateChange = () => {
-    if (this.context?.state === 'running') {
-      this.removeUnlockListeners();
-    } else {
-      this.addUnlockListeners();
-    }
-  };
+  private readonly playing = new Set<OscillatorNode>();
 
-  constructor(sceneEl: Scene, options: StereoToneOptions) {
-    this.sceneEl = sceneEl;
+  constructor(audio: AudioSystem, options: StereoToneOptions) {
+    this.audio = audio;
     this.options = options;
-    this.addUnlockListeners();
-    sceneEl.addEventListener('enter-vr', this.onEnterVr);
-    sceneEl.addEventListener('exit-vr', this.onExitVr);
   }
 
   present(direction: TurnDirection): boolean {
-    const context = this.context;
+    const context = this.audio.runningContext();
 
-    if (context?.state !== 'running') {
+    if (!context) {
       return false;
     }
 
@@ -76,43 +49,20 @@ export class StereoToneOutput implements CueOutput {
 
     oscillator.connect(envelope).connect(panner).connect(context.destination);
     oscillator.addEventListener('ended', () => {
+      this.playing.delete(oscillator);
       oscillator.disconnect();
       envelope.disconnect();
       panner.disconnect();
     });
     oscillator.start(start);
     oscillator.stop(end);
+    this.playing.add(oscillator);
 
     return true;
   }
 
+  /** Cuts off tones still playing; the shared context outlives this output. */
   dispose(): void {
-    this.removeUnlockListeners();
-    this.onExitVr();
-    this.sceneEl.removeEventListener('enter-vr', this.onEnterVr);
-    this.sceneEl.removeEventListener('exit-vr', this.onExitVr);
-    void this.context?.close();
-    this.context = null;
-  }
-
-  private resume(): void {
-    if (!this.context) {
-      this.context = new AudioContext();
-      this.context.addEventListener('statechange', this.onStateChange);
-      // A context created inside a gesture may start running without a state change.
-      this.onStateChange();
-    }
-
-    if (this.context.state !== 'running') {
-      void this.context.resume();
-    }
-  }
-
-  private addUnlockListeners(): void {
-    UNLOCK_EVENTS.forEach((type) => document.addEventListener(type, this.unlock, { capture: true }));
-  }
-
-  private removeUnlockListeners(): void {
-    UNLOCK_EVENTS.forEach((type) => document.removeEventListener(type, this.unlock, { capture: true }));
+    this.playing.forEach((oscillator) => oscillator.stop());
   }
 }

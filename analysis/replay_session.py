@@ -40,7 +40,7 @@ from PIL import Image, ImageDraw
 REPO_DIR = Path(__file__).resolve().parent.parent
 PUBLIC_DIR = REPO_DIR / "public"
 LOG_DIR = REPO_DIR / "log"
-LOG_VERSION = 2
+LOG_VERSION = 3
 COMPONENTS = ("total", "rigInduced")
 PANEL_SCALE = 4
 # Flow magnitude (deg/s) that maps to full colour saturation in the flow panels.
@@ -289,7 +289,7 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
         if event["type"] == "turn-cue":
             colour = "C2" if event["direction"] == "left" else "C1"
             axis.axvline(event["timeMs"] / 1000, color=colour, alpha=0.8 if event["presented"] else 0.3)
-    axis.set_ylabel(f"turn deg/s (+left)\nsource: {config['source']}, output: {config['output']}")
+    axis.set_ylabel(f"turn deg/s (+left)\ncondition: {log['condition']} (output: {config['output']})")
     axis.legend(loc="upper right")
 
 

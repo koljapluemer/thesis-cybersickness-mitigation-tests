@@ -1,3 +1,5 @@
+import type { ConditionSystem } from '../conditions/condition-system';
+import type { ConditionId } from '../conditions/conditions';
 import type { TurnCueData, TurnCueSystem } from '../turn-cues/turn-cue-system';
 import type { TurnCue, TurnSignal } from '../turn-cues/types';
 import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
@@ -45,7 +47,7 @@ export type LoggedEvent =
 
 export type SessionLog = {
   format: 'optical-flow-session';
-  version: 2;
+  version: 3;
   startedAt: string;
   endedAt: string;
   userAgent: string;
@@ -55,6 +57,9 @@ export type SessionLog = {
     fieldChannels: readonly string[];
     fieldSnapshotIntervalMs: number;
   };
+  /** Experimental condition, fixed for the whole recording. */
+  condition: ConditionId;
+  /** Effective `turn-cues` configuration under that condition. */
   turnCues: TurnCueData;
   scene: SceneDescription;
   events: LoggedEvent[];
@@ -87,11 +92,13 @@ function encodeField(field: FlowField): string {
 /**
  * Records every rendered frame's poses and flow measurements while running.
  * The log is complete enough to re-render and re-measure the session offline.
+ * The experimental condition is locked while recording, so a log has exactly one.
  */
 export class FlowSessionRecorder {
   private readonly sceneEl: Element;
   private readonly meter: OpticalFlowSystem;
   private readonly turnCues: TurnCueSystem;
+  private readonly conditions: ConditionSystem;
   private readonly options: RecorderOptions;
   private log: SessionLog | null = null;
   private startTime = 0;
@@ -99,10 +106,17 @@ export class FlowSessionRecorder {
   private readonly framesByNumber = new Map<number, LoggedFrame>();
   private unsubscribers: Unsubscribe[] = [];
 
-  constructor(sceneEl: Element, meter: OpticalFlowSystem, turnCues: TurnCueSystem, options: RecorderOptions) {
+  constructor(
+    sceneEl: Element,
+    meter: OpticalFlowSystem,
+    turnCues: TurnCueSystem,
+    conditions: ConditionSystem,
+    options: RecorderOptions,
+  ) {
     this.sceneEl = sceneEl;
     this.meter = meter;
     this.turnCues = turnCues;
+    this.conditions = conditions;
     this.options = options;
   }
 
@@ -124,7 +138,7 @@ export class FlowSessionRecorder {
     this.framesByNumber.clear();
     this.log = {
       format: 'optical-flow-session',
-      version: 2,
+      version: 3,
       startedAt: new Date().toISOString(),
       endedAt: '',
       userAgent: navigator.userAgent,
@@ -134,6 +148,7 @@ export class FlowSessionRecorder {
         fieldChannels: FIELD_CHANNELS,
         fieldSnapshotIntervalMs: this.options.fieldSnapshotIntervalMs,
       },
+      condition: this.conditions.state.id,
       turnCues: { ...this.turnCues.data },
       scene: this.options.describeScene(),
       events: [],
@@ -146,6 +161,7 @@ export class FlowSessionRecorder {
 
     this.unsubscribers = [
       this.meter.onFrame((frame) => this.recordFrame(frame)),
+      this.conditions.lock(),
       this.meter.onSample((sample) => this.recordSample(sample)),
       this.turnCues.onSignal((signal) => this.log?.turnSignals.push(signal)),
       this.turnCues.onCue((cue) => this.log?.events.push({ timeMs: this.elapsedMs(), type: 'turn-cue', ...cue })),

@@ -1,5 +1,6 @@
 import 'aframe';
 import type { Scene, System } from 'aframe';
+import { getAudio } from '../audio/audio-system';
 import { getOpticalFlow } from '../optical-flow/optical-flow-system';
 import type { Unsubscribe } from '../optical-flow/types';
 import { createOpticalFlowTurnSource } from './optical-flow-turn-source';
@@ -26,7 +27,7 @@ const SOURCES: Record<Exclude<TurnCueData['source'], 'none'>, (sceneEl: Scene) =
 };
 
 const OUTPUTS: Record<Exclude<TurnCueData['output'], 'none'>, (sceneEl: Scene, data: TurnCueData) => CueOutput> = {
-  'stereo-tone': (sceneEl, data) => new StereoToneOutput(sceneEl, {
+  'stereo-tone': (sceneEl, data) => new StereoToneOutput(getAudio(sceneEl), {
     frequencyHz: data.toneFrequencyHz,
     durationMs: data.toneDurationMs,
     fadeMs: data.fadeMs,
@@ -52,15 +53,15 @@ type TurnCueInternals = TurnCueSystem & {
 
 /**
  * Turn cues: a turn-rate source feeds a `TurnDetector`, whose cues go to an
- * output. Source and output are chosen by the schema, so conditions (no sound,
- * another signal source) are a matter of configuration.
+ * output. Source and output are chosen by the schema; the `condition` system
+ * sets that schema per experimental condition.
  */
 AFRAME.registerSystem('turn-cues', {
   schema: {
     source: { type: 'string', default: 'optical-flow', oneOf: ['optical-flow', 'none'] },
     output: { type: 'string', default: 'stereo-tone', oneOf: ['stereo-tone', 'none'] },
-    onThresholdDegPerSec: { type: 'number', default: 10 },
-    offThresholdDegPerSec: { type: 'number', default: 5 },
+    onThresholdDegPerSec: { type: 'number', default: 5 },
+    offThresholdDegPerSec: { type: 'number', default: 2 },
     smoothingMs: { type: 'number', default: 250 },
     toneFrequencyHz: { type: 'number', default: 800 },
     toneDurationMs: { type: 'number', default: 1000 },
