@@ -1,0 +1,25 @@
+{
+  "name": "acquire-propositions-3d",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/aframe": "^1.2.9",
+    "eslint": "^10.2.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.2",
+    "vite": "^8.0.4"
+  },
+  "dependencies": {
+    "aframe": "^1.7.1",
+    "firebase": "^12.12.0"
+  }
+}
