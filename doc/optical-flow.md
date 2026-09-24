@@ -168,6 +168,9 @@ recomputes both flow fields independently of the browser and writes:
   - |live − recomputed| (white = 5 °/s; magenta = coverage disagreement)
 - `validation.json`: error statistics per snapshot and component (angular
   speed and horizontal channel).
+- `kinematics.png`, `agreement-*.png`, `agreement.json`: rig and head
+  kinematics derived from the poses, and how far the live flow agrees with
+  them. See `pose-flow-agreement.md`.
 
 A first desktop recording (log format 1) (headless Chrome, 107 frames) gave:
 

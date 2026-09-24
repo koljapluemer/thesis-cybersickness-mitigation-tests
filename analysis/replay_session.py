@@ -17,6 +17,9 @@ Outputs in DIR (default: next to the log, `<log name>-replay/`):
                      (live panels are blank on frames without a live field snapshot)
     replay.mp4       the frames as a video
     validation.json  live vs. recomputed error statistics
+    kinematics.png, agreement-*.png, agreement.json
+                     rig and head kinematics from the poses and their agreement with the
+                     live flow measurement (see pose_flow.py, doc/pose-flow-agreement.md)
 """
 
 from __future__ import annotations
@@ -37,19 +40,14 @@ import numpy as np
 import trimesh
 from PIL import Image, ImageDraw
 
-REPO_DIR = Path(__file__).resolve().parent.parent
+from pose_flow import analyse as analyse_pose_flow
+from session_log import LOG_DIR, REPO_DIR, latest_log, load_log, mat4
+
 PUBLIC_DIR = REPO_DIR / "public"
-LOG_DIR = REPO_DIR / "log"
-LOG_VERSION = 3
 COMPONENTS = ("total", "rigInduced")
 PANEL_SCALE = 4
 # Flow magnitude (deg/s) that maps to full colour saturation in the flow panels.
 FLOW_COLOUR_RANGE_DEG_PER_SEC = 60.0
-
-
-def mat4(values: list[float]) -> np.ndarray:
-    """Column-major three.js matrix array -> 4x4 numpy matrix."""
-    return np.asarray(values, dtype=np.float64).reshape(4, 4).T
 
 
 def decode_fields(entry: dict) -> dict[str, np.ndarray]:
@@ -293,14 +291,6 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
     axis.legend(loc="upper right")
 
 
-def latest_log() -> Path:
-    # File names carry ISO timestamps, so lexical order is chronological.
-    logs = sorted(LOG_DIR.glob("optical-flow-*.json"))
-    if not logs:
-        raise SystemExit(f"no optical-flow-*.json logs in {LOG_DIR}")
-    return logs[-1]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("log", type=Path, nargs="?", help=f"session log (default: latest in {LOG_DIR})")
@@ -311,9 +301,7 @@ def main() -> None:
     args.log = args.log or latest_log()
     print(f"log: {args.log}")
 
-    log = json.loads(args.log.read_text())
-    if log.get("version") != LOG_VERSION:
-        raise SystemExit(f"log format version {log.get('version')} is not supported (expected {LOG_VERSION})")
+    log = load_log(args.log)
     out = args.out or args.log.with_name(args.log.stem + "-replay")
     (out / "frames").mkdir(parents=True, exist_ok=True)
 
@@ -324,6 +312,14 @@ def main() -> None:
     print(f"{len(log['frames'])} frames over {duration:.1f}s, {len(measured)} measured, {cues} turn cues, XR events: {xr_events}")
 
     plot_timeseries(log, out / "timeseries.png")
+    for name, pair in analyse_pose_flow(log, out)["pairs"].items():
+        if "skipped" in pair:
+            continue
+        statistics = pair["statistics"]
+        line = f"{name}: r {statistics['pearsonR']['value']:.3f}, CCF peak lag {pair['ccfPeakLagMs']:.0f} ms"
+        if pair["sameUnits"]:
+            line += f", CCC {statistics['concordanceCcc']['value']:.3f}, bias {statistics['bias']['value']:.2f} °/s"
+        print(line)
     landscape = load_landscape(log)
 
     replay = []

@@ -27,7 +27,8 @@ head-locked HUD rotation indicators have since been removed.
 | `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
 | `doc/turn-cues.md` | Turn cue pipeline, configuration and audio unlock. |
 | `doc/conditions.md` | Experimental conditions: architecture, switching, adding conditions and mitigations. |
-| `analysis/` | uv project; `replay_session.py` replays a session log offline and validates the live flow measurement. |
+| `analysis/` | uv project; `replay_session.py` replays a session log offline, validates the live flow measurement and compares it with the pose kinematics. |
+| `doc/pose-flow-agreement.md` | Rig and head kinematics from the logged poses and the statistics of their agreement with the optical flow. |
 | `src/style.css` | Fullscreen layout reset for the embedded `<a-scene>`. |
 | `index.html` | Entry point, mounts the scene into `#app`, loads a GoatCounter analytics beacon. |
 | `public/tour-path.json` | `{ duration, points: [{ t, position }] }` — the pre-baked flight path (600 samples over 120 s, `duration` must equal the last `t`), flown as a closed loop with Catmull-Rom interpolation at runtime. |
