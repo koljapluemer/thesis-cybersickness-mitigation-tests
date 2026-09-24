@@ -20,12 +20,14 @@ head-locked HUD rotation indicators have since been removed.
 | `src/main.ts` | Scene markup and wiring of the flow recorder and its button. |
 | `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path. |
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
+| `src/turn-cues/` | Turn cues (`turn-cues` A-Frame system): turn rate from the live rig-induced flow → detector → left/right stereo tone. See `doc/turn-cues.md`. |
 | `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
 | `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
+| `doc/turn-cues.md` | Turn cue pipeline, configuration (experimental conditions) and audio unlock. |
 | `analysis/` | uv project; `replay_session.py` replays a session log offline and validates the live flow measurement. |
 | `src/style.css` | Fullscreen layout reset for the embedded `<a-scene>`. |
 | `index.html` | Entry point, mounts the scene into `#app`, loads a GoatCounter analytics beacon. |
-| `public/tour-path.json` | `{ duration, points: [{ t, position }] }` — the pre-baked flight path (600 samples over 120s), keyframe-interpolated at runtime. |
+| `public/tour-path.json` | `{ duration, points: [{ t, position }] }` — the pre-baked flight path (600 samples over 120 s, `duration` must equal the last `t`), flown as a closed loop with Catmull-Rom interpolation at runtime. |
 | `public/export_tour_path.py` | Blender script: samples a curve object named `TourPath` in a `.blend` file and exports it to `tour-path.json`, converting Blender's Z-up axis convention to A-Frame's Y-up. Run inside Blender's scripting console, not part of the app build. |
 | `public/mountains/` | The glTF landscape flown over. |
 | `issues/` | Free-form dev notes/TODOs, not formal issue tracking. |
@@ -34,8 +36,9 @@ head-locked HUD rotation indicators have since been removed.
 
 - **`tour-flight` component** — drives the camera rig. On `init` it fetches
   `tour-path.json`; on every `tick` it samples the current position and a
-  short look-ahead position (`samplePath`, linear interpolation between
-  keyframes), transforms both into world space (`applyWorldTransform`: scale →
+  short look-ahead position (`samplePath`, time-parameterized Catmull-Rom
+  spline through the keyframes, looping seamlessly via a closing segment back
+  to the first keyframe), transforms both into world space (`applyWorldTransform`: scale →
   rotate by a fixed `rotationY` → offset), then sets `object3D.position` and
   calls `object3D.lookAt(lookTarget)` before applying a fixed pitch tilt. This
   is what makes the camera *bank and turn on its own*.
@@ -50,6 +53,10 @@ head-locked HUD rotation indicators have since been removed.
   by the rig motion alone. Its API is `getOpticalFlow(sceneEl)`. The
   "Record optical flow" button logs every frame and downloads the log as JSON.
   Details: `doc/optical-flow.md`.
+- **`turn-cues` system** (configured on `<a-scene>`) — detects turns from the
+  live rig-induced flow and plays an 800 Hz tone on the left or right channel.
+  Source and output are configurable, which is how experimental conditions
+  are set. Details: `doc/turn-cues.md`.
 
 ## Running
 

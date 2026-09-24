@@ -1,6 +1,8 @@
+import type { TurnCueData, TurnCueSystem } from '../turn-cues/turn-cue-system';
+import type { TurnCue, TurnSignal } from '../turn-cues/types';
 import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
 import type { OpticalFlowSystem } from './optical-flow-system';
-import type { Eye, FlowField, FlowFrame, FlowMeasurement, FlowSample, Unsubscribe, ViewPose } from './types';
+import type { Eye, FlowComponent, FlowField, FlowFrame, FlowMeasurement, FlowSample, Unsubscribe, ViewPose } from './types';
 
 /** Static description of the scene, needed to reproduce the rendered views offline. */
 export type SceneDescription = {
@@ -12,13 +14,11 @@ export type SceneDescription = {
   tour: Record<string, unknown>;
 };
 
-export type LoggedField = {
+export type LoggedFields = {
   eye: Eye;
   width: number;
   height: number;
-  /** Base64 of little-endian float32 data, layout as in `FlowField`. */
-  data: string;
-};
+} & Record<FlowComponent, string>; // base64 of little-endian float32 data, layout as in `FlowField`
 
 export type LoggedFrame = {
   frame: number;
@@ -36,12 +36,16 @@ export type LoggedFrame = {
     combined: FlowMeasurement;
     views: (FlowMeasurement & { eye: Eye })[];
   } | null;
-  fields?: LoggedField[];
+  fields?: LoggedFields[];
 };
+
+export type LoggedEvent =
+  | { timeMs: number; type: 'enter-vr' | 'exit-vr' }
+  | ({ timeMs: number; type: 'turn-cue' } & TurnCue);
 
 export type SessionLog = {
   format: 'optical-flow-session';
-  version: 1;
+  version: 2;
   startedAt: string;
   endedAt: string;
   userAgent: string;
@@ -51,9 +55,12 @@ export type SessionLog = {
     fieldChannels: readonly string[];
     fieldSnapshotIntervalMs: number;
   };
+  turnCues: TurnCueData;
   scene: SceneDescription;
-  events: { timeMs: number; type: string }[];
+  events: LoggedEvent[];
   frames: LoggedFrame[];
+  /** Every accepted turn-rate sample of the cue detector, raw and smoothed. */
+  turnSignals: TurnSignal[];
 };
 
 export type RecorderOptions = {
@@ -63,7 +70,7 @@ export type RecorderOptions = {
   fieldSnapshotIntervalMs: number;
 };
 
-const FIELD_CHANNELS = ['ndcFlowX', 'ndcFlowY', 'totalDegPerSec', 'rigInducedDegPerSec'] as const;
+const FIELD_CHANNELS = ['ndcFlowX', 'ndcFlowY', 'angularDegPerSec', 'horizontalDegPerSec'] as const;
 const XR_EVENTS = ['enter-vr', 'exit-vr'] as const;
 
 function encodeField(field: FlowField): string {
@@ -84,6 +91,7 @@ function encodeField(field: FlowField): string {
 export class FlowSessionRecorder {
   private readonly sceneEl: Element;
   private readonly meter: OpticalFlowSystem;
+  private readonly turnCues: TurnCueSystem;
   private readonly options: RecorderOptions;
   private log: SessionLog | null = null;
   private startTime = 0;
@@ -91,9 +99,10 @@ export class FlowSessionRecorder {
   private readonly framesByNumber = new Map<number, LoggedFrame>();
   private unsubscribers: Unsubscribe[] = [];
 
-  constructor(sceneEl: Element, meter: OpticalFlowSystem, options: RecorderOptions) {
+  constructor(sceneEl: Element, meter: OpticalFlowSystem, turnCues: TurnCueSystem, options: RecorderOptions) {
     this.sceneEl = sceneEl;
     this.meter = meter;
+    this.turnCues = turnCues;
     this.options = options;
   }
 
@@ -115,7 +124,7 @@ export class FlowSessionRecorder {
     this.framesByNumber.clear();
     this.log = {
       format: 'optical-flow-session',
-      version: 1,
+      version: 2,
       startedAt: new Date().toISOString(),
       endedAt: '',
       userAgent: navigator.userAgent,
@@ -125,17 +134,21 @@ export class FlowSessionRecorder {
         fieldChannels: FIELD_CHANNELS,
         fieldSnapshotIntervalMs: this.options.fieldSnapshotIntervalMs,
       },
+      turnCues: { ...this.turnCues.data },
       scene: this.options.describeScene(),
       events: [],
       frames: [],
+      turnSignals: [],
     };
 
-    const onXrEvent = (event: Event) => this.log?.events.push({ timeMs: this.elapsedMs(), type: event.type });
+    const onXrEvent = (event: Event) => this.log?.events.push({ timeMs: this.elapsedMs(), type: event.type as 'enter-vr' | 'exit-vr' });
     XR_EVENTS.forEach((type) => this.sceneEl.addEventListener(type, onXrEvent));
 
     this.unsubscribers = [
       this.meter.onFrame((frame) => this.recordFrame(frame)),
       this.meter.onSample((sample) => this.recordSample(sample)),
+      this.turnCues.onSignal((signal) => this.log?.turnSignals.push(signal)),
+      this.turnCues.onCue((cue) => this.log?.events.push({ timeMs: this.elapsedMs(), type: 'turn-cue', ...cue })),
       () => XR_EVENTS.forEach((type) => this.sceneEl.removeEventListener(type, onXrEvent)),
     ];
   }
@@ -198,7 +211,6 @@ export class FlowSessionRecorder {
         coverage: view.coverage,
         total: view.total,
         rigInduced: view.rigInduced,
-        bands: view.bands,
       })),
     };
 
@@ -206,9 +218,10 @@ export class FlowSessionRecorder {
       this.lastSnapshotSceneTimeMs = sample.sceneTimeMs;
       logged.fields = sample.views.map((view) => ({
         eye: view.eye,
-        width: view.field.width,
-        height: view.field.height,
-        data: encodeField(view.field),
+        width: view.fields.total.width,
+        height: view.fields.total.height,
+        total: encodeField(view.fields.total),
+        rigInduced: encodeField(view.fields.rigInduced),
       }));
     }
   }

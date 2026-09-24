@@ -2,7 +2,8 @@
 
 Re-renders every replayed frame from the logged poses by ray casting the
 landscape, recomputes the flow field independently of the browser, and
-compares it with the field snapshots measured live.
+compares it with the field snapshots measured live. Both flow components are
+validated: total (rig + head motion) and rig-induced (rig motion alone).
 
 Usage:
     cd analysis && uv run replay_session.py [optical-flow-<date>.json] [--out DIR] [--all-frames] [--every N]
@@ -10,8 +11,9 @@ Usage:
 Without a log argument, the latest `optical-flow-*.json` in the repository's `log/` is used.
 
 Outputs in DIR (default: next to the log, `<log name>-replay/`):
-    timeseries.png   live flow measurements over the session
+    timeseries.png   live flow measurements, turn signal and turn cues over the session
     frames/*.png     per replayed view: reconstruction | live flow | recomputed flow | |difference|
+                     (total flow)
                      (live panels are blank on frames without a live field snapshot)
     replay.mp4       the frames as a video
     validation.json  live vs. recomputed error statistics
@@ -38,6 +40,8 @@ from PIL import Image, ImageDraw
 REPO_DIR = Path(__file__).resolve().parent.parent
 PUBLIC_DIR = REPO_DIR / "public"
 LOG_DIR = REPO_DIR / "log"
+LOG_VERSION = 2
+COMPONENTS = ("total", "rigInduced")
 PANEL_SCALE = 4
 # Flow magnitude (deg/s) that maps to full colour saturation in the flow panels.
 FLOW_COLOUR_RANGE_DEG_PER_SEC = 60.0
@@ -48,9 +52,12 @@ def mat4(values: list[float]) -> np.ndarray:
     return np.asarray(values, dtype=np.float64).reshape(4, 4).T
 
 
-def decode_field(field: dict) -> np.ndarray:
-    data = np.frombuffer(base64.b64decode(field["data"]), dtype="<f4")
-    return data.reshape(field["height"], field["width"], 4)
+def decode_fields(entry: dict) -> dict[str, np.ndarray]:
+    """Logged field snapshot of one view -> {component: [h, w, 4]}."""
+    return {
+        component: np.frombuffer(base64.b64decode(entry[component]), dtype="<f4").reshape(entry["height"], entry["width"], 4)
+        for component in COMPONENTS
+    }
 
 
 @dataclass
@@ -101,12 +108,19 @@ def angle_deg(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.degrees(np.arctan2(np.linalg.norm(np.cross(a, b), axis=1), np.einsum("ij,ij->i", a, b)))
 
 
+def azimuth_change_deg(prev: np.ndarray, current: np.ndarray) -> np.ndarray:
+    """Signed change of eye-space azimuth from prev to current, positive = rightward."""
+    p = np.stack([-prev[:, 2], prev[:, 0]], axis=1)  # (forward, right)
+    c = np.stack([-current[:, 2], current[:, 0]], axis=1)
+    return np.degrees(np.arctan2(p[:, 0] * c[:, 1] - p[:, 1] * c[:, 0], np.einsum("ij,ij->i", p, c)))
+
+
 def to_eye(view: np.ndarray, points: np.ndarray) -> np.ndarray:
     return points @ view[:3, :3].T + view[:3, 3]
 
 
 def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: int, width: int, height: int):
-    """Returns (flow field [h, w, 4] in the live layout, colour image [h, w, 3])."""
+    """Returns ({component: flow field [h, w, 4] in the live layout}, colour image [h, w, 3])."""
     view = frame["views"][view_index]
     eye_world = mat4(view["matrixWorld"])
     projection = mat4(view["projectionMatrix"])
@@ -119,7 +133,7 @@ def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: i
     origins = np.repeat(eye_world[:3, 3][None], len(directions), axis=0)
     locations, ray_index, triangle_index = landscape.mesh.ray.intersects_location(origins, directions, multiple_hits=False)
 
-    field = np.tile(np.array([0, 0, -1, -1], dtype=np.float32), (width * height, 1))
+    fields = {component: np.tile(np.array([0, 0, -1, 0], dtype=np.float32), (width * height, 1)) for component in COMPONENTS}
     colour = np.tile(np.array([0.86, 0.93, 0.97], dtype=np.float32), (width * height, 1))
 
     if len(locations):
@@ -135,9 +149,11 @@ def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: i
         def unit(vectors: np.ndarray) -> np.ndarray:
             return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
-        field[ray_index, 0:2] = (ndc(current) - ndc(prev)) * inv_dt
-        field[ray_index, 2] = angle_deg(unit(prev), unit(current)) * inv_dt
-        field[ray_index, 3] = angle_deg(unit(rig_prev), unit(current)) * inv_dt
+        for component, previous_points in (("total", prev), ("rigInduced", rig_prev)):
+            field = fields[component]
+            field[ray_index, 0:2] = (ndc(current) - ndc(previous_points)) * inv_dt
+            field[ray_index, 2] = angle_deg(unit(previous_points), unit(current)) * inv_dt
+            field[ray_index, 3] = azimuth_change_deg(previous_points, current) * inv_dt
 
         # Texture lookup with simple Lambert shading, only for orientation.
         faces = landscape.mesh.faces[triangle_index]
@@ -154,7 +170,7 @@ def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: i
         shade = 0.55 + 0.45 * np.abs(normals @ light)
         colour[ray_index] = texel * shade[:, None]
 
-    return field.reshape(height, width, 4), colour.reshape(height, width, 3)
+    return {component: field.reshape(height, width, 4) for component, field in fields.items()}, colour.reshape(height, width, 3)
 
 
 def flow_image(field: np.ndarray) -> Image.Image:
@@ -218,16 +234,16 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frames = [frame for frame in log["frames"] if frame["flow"] is not None]
     t = np.array([frame["timeMs"] / 1000 for frame in frames])
     combined = [frame["flow"]["combined"] for frame in frames]
-    figure, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
 
     axes[0].plot(t, [c["total"]["meanDegPerSec"] for c in combined], label="total mean")
     axes[0].plot(t, [c["rigInduced"]["meanDegPerSec"] for c in combined], label="rig-induced mean", linestyle="--")
     axes[0].set_ylabel("deg/s")
     axes[0].legend()
 
-    for index, band in enumerate(combined[0]["bands"] if combined else []):
+    for index, band in enumerate(combined[0]["total"]["bands"] if combined else []):
         label = f"{band['minEccentricityDeg']}–{band['maxEccentricityDeg']}°"
-        axes[1].plot(t, [c["bands"][index]["totalMeanDegPerSec"] for c in combined], label=label)
+        axes[1].plot(t, [c["total"]["bands"][index]["meanDegPerSec"] for c in combined], label=label)
     axes[1].set_ylabel("deg/s by eccentricity")
     axes[1].legend()
 
@@ -237,9 +253,12 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frame_time_axis = axes[2].twinx()
     frame_time_axis.plot(t, [frame["deltaMs"] for frame in frames], color="C1", alpha=0.5)
     frame_time_axis.set_ylabel("frame time (ms)", color="C1")
-    axes[2].set_xlabel("session time (s)")
+    plot_turn_signal(log, axes[3])
+    axes[3].set_xlabel("session time (s)")
 
     for event in log["events"]:
+        if event["type"] == "turn-cue":
+            continue
         for axis in axes:
             axis.axvline(event["timeMs"] / 1000, color="grey", linestyle=":")
         axes[0].annotate(event["type"], (event["timeMs"] / 1000, axes[0].get_ylim()[1]), fontsize=8)
@@ -247,6 +266,31 @@ def plot_timeseries(log: dict, path: Path) -> None:
     figure.tight_layout()
     figure.savefig(path, dpi=110)
     plt.close(figure)
+
+
+def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
+    """Turn-rate signal of the cue detector (positive = left), thresholds and cues."""
+    config = log["turnCues"]
+    frames = log["frames"]
+    signals = log["turnSignals"]
+    if signals and frames:
+        # Signals carry scene time; map it to session time via the frames.
+        t = np.interp(
+            [signal["sceneTimeMs"] for signal in signals],
+            [frame["sceneTimeMs"] for frame in frames],
+            [frame["timeMs"] / 1000 for frame in frames],
+        )
+        axis.plot(t, [signal["turnDegPerSec"] for signal in signals], color="C0", alpha=0.35, label="raw")
+        axis.plot(t, [signal["smoothedDegPerSec"] for signal in signals], color="C0", label="smoothed")
+    for sign in (1, -1):
+        axis.axhline(sign * config["onThresholdDegPerSec"], color="C3", linestyle="--", linewidth=0.8)
+        axis.axhline(sign * config["offThresholdDegPerSec"], color="C3", linestyle=":", linewidth=0.8)
+    for event in log["events"]:
+        if event["type"] == "turn-cue":
+            colour = "C2" if event["direction"] == "left" else "C1"
+            axis.axvline(event["timeMs"] / 1000, color=colour, alpha=0.8 if event["presented"] else 0.3)
+    axis.set_ylabel(f"turn deg/s (+left)\nsource: {config['source']}, output: {config['output']}")
+    axis.legend(loc="upper right")
 
 
 def latest_log() -> Path:
@@ -268,12 +312,16 @@ def main() -> None:
     print(f"log: {args.log}")
 
     log = json.loads(args.log.read_text())
+    if log.get("version") != LOG_VERSION:
+        raise SystemExit(f"log format version {log.get('version')} is not supported (expected {LOG_VERSION})")
     out = args.out or args.log.with_name(args.log.stem + "-replay")
     (out / "frames").mkdir(parents=True, exist_ok=True)
 
     measured = [frame for frame in log["frames"] if frame["flow"] is not None]
     duration = log["frames"][-1]["timeMs"] / 1000 if log["frames"] else 0
-    print(f"{len(log['frames'])} frames over {duration:.1f}s, {len(measured)} measured, XR events: {log['events']}")
+    xr_events = [event for event in log["events"] if event["type"] != "turn-cue"]
+    cues = len(log["events"]) - len(xr_events)
+    print(f"{len(log['frames'])} frames over {duration:.1f}s, {len(measured)} measured, {cues} turn cues, XR events: {xr_events}")
 
     plot_timeseries(log, out / "timeseries.png")
     landscape = load_landscape(log)
@@ -289,33 +337,39 @@ def main() -> None:
     errors = []
     video_frames = []
     for number, (frame, previous) in enumerate(replay):
-        live_fields = {field["eye"]: decode_field(field) for field in frame.get("fields", [])}
+        live_fields = {entry["eye"]: decode_fields(entry) for entry in frame.get("fields", [])}
         for view_index, view in enumerate(frame["views"]):
             width, height = view["fieldWidth"], view["fieldHeight"]
             replayed, colour = replay_view(landscape, frame, previous, view_index, width, height)
             live = live_fields.get(view["eye"])
             blank = Image.new("RGB", (width * PANEL_SCALE, height * PANEL_SCALE), (40, 40, 40))
-            panels = [upscale(colour), blank, flow_image(replayed), blank]
+            panels = [upscale(colour), blank, flow_image(replayed["total"]), blank]
             caption = (
                 f"frame {frame['frame']}  t={frame['timeMs'] / 1000:.2f}s  path={frame['pathTimeSec']:.2f}s  "
                 f"eye={view['eye']}  live mean={frame['flow']['views'][view_index]['total']['meanDegPerSec']:.1f}°/s"
             )
             if live is not None:
-                both = (live[..., 2] >= 0) & (replayed[..., 2] >= 0)
-                abs_error = np.abs(live[..., 2] - replayed[..., 2])[both]
-                rig_error = np.abs(live[..., 3] - replayed[..., 3])[both]
-                errors.append({
+                covered_live = live["total"][..., 2] >= 0
+                covered_replayed = replayed["total"][..., 2] >= 0
+                both = covered_live & covered_replayed
+                error = {
                     "frame": frame["frame"],
                     "eye": view["eye"],
-                    "coverageAgreement": float(np.mean((live[..., 2] >= 0) == (replayed[..., 2] >= 0))),
-                    "totalAbsErrorMedian": float(np.median(abs_error)),
-                    "totalAbsErrorP95": float(np.percentile(abs_error, 95)),
-                    "rigAbsErrorMedian": float(np.median(rig_error)),
-                    "liveMean": float(np.mean(live[..., 2][both])),
-                    "replayedMean": float(np.mean(replayed[..., 2][both])),
-                })
-                panels = [upscale(colour), flow_image(live), flow_image(replayed), difference_image(live, replayed)]
-                caption += f"  |err| median={errors[-1]['totalAbsErrorMedian']:.2f}°/s"
+                    "coverageAgreement": float(np.mean(covered_live == covered_replayed)),
+                }
+                for component in COMPONENTS:
+                    speed_error = np.abs(live[component][..., 2] - replayed[component][..., 2])[both]
+                    horizontal_error = np.abs(live[component][..., 3] - replayed[component][..., 3])[both]
+                    error[component] = {
+                        "absErrorMedian": float(np.median(speed_error)),
+                        "absErrorP95": float(np.percentile(speed_error, 95)),
+                        "horizontalAbsErrorMedian": float(np.median(horizontal_error)),
+                        "liveMean": float(np.mean(live[component][..., 2][both])),
+                        "replayedMean": float(np.mean(replayed[component][..., 2][both])),
+                    }
+                errors.append(error)
+                panels = [upscale(colour), flow_image(live["total"]), flow_image(replayed["total"]), difference_image(live["total"], replayed["total"])]
+                caption += f"  |err| median={error['total']['absErrorMedian']:.2f}°/s"
             image = composite(panels, caption)
             image.save(out / "frames" / f"{frame['frame']:07d}-{view['eye']}.png")
             video_frames.append(np.asarray(image))
@@ -327,12 +381,16 @@ def main() -> None:
         fps = max(1, round(len(replay) / duration)) if duration else 1
         iio.imwrite(out / "replay.mp4", [f for f in video_frames if f.shape == size], fps=fps, codec="libx264", macro_block_size=1)
 
+    def median_of(component: str, key: str) -> float | None:
+        return float(np.median([e[component][key] for e in errors])) if errors else None
+
     summary = {
         "snapshots": len(errors),
         "coverageAgreementMean": float(np.mean([e["coverageAgreement"] for e in errors])) if errors else None,
-        "totalAbsErrorMedian": float(np.median([e["totalAbsErrorMedian"] for e in errors])) if errors else None,
-        "totalAbsErrorP95Median": float(np.median([e["totalAbsErrorP95"] for e in errors])) if errors else None,
-        "rigAbsErrorMedian": float(np.median([e["rigAbsErrorMedian"] for e in errors])) if errors else None,
+        **{
+            component: {key: median_of(component, key) for key in ("absErrorMedian", "absErrorP95", "horizontalAbsErrorMedian")}
+            for component in COMPONENTS
+        },
         "perSnapshot": errors,
     }
     (out / "validation.json").write_text(json.dumps(summary, indent=2))

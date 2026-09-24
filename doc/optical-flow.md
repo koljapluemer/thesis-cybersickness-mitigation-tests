@@ -15,15 +15,16 @@ WebXR, so the rotation of the eye itself (smooth pursuit) is not accounted for.
 The scene is static, so all flow comes from camera motion. The flow is computed
 exactly from geometry (depth and the two camera poses), not estimated from pixels.
 
-**Two components per pixel:**
+**Two components, each a complete field of its own:**
 
 - **total**: all flow on the display, from the scripted rig (vehicle) motion plus
-  the user's own head motion in VR.
+  the user's own head motion in VR. What the user actually sees; for analysis.
 - **rigInduced**: the flow the rig motion alone would have produced. The previous
   eye pose is recomputed with the head pose relative to the rig held fixed:
   `prevRig · rig⁻¹ · eye`. This is the part of the flow that has no matching
-  vestibular signal, which is what matters for cybersickness. On desktop there is
-  no head motion, so `rigInduced == total`.
+  vestibular signal, which is what matters for cybersickness, and what drives
+  countermeasures such as the turn cues (`doc/turn-cues.md`). On desktop there
+  is no head motion, so `rigInduced == total`.
 
 The rig is whatever the camera entity is mounted on
 (`camera.el.object3D.parent`), which here is the `tour-flight` entity.
@@ -41,26 +42,30 @@ Code lives in `src/optical-flow/`.
    after the main render):
    - Collects the active views. In XR these are the two eye cameras from
      `renderer.xr.getCamera().cameras`; on desktop it is the scene camera.
-   - Per view, re-renders the scene into a small `FloatType` render target
-     (height `fieldHeight`, default 64; width follows the view's aspect). It uses
+   - Per view, re-renders the scene into a small `FloatType` render target with
+     two color attachments (0 = total, 1 = rigInduced; height `fieldHeight`,
+     default 64; width follows the view's aspect). It uses
      `scene.overrideMaterial` = the flow material and temporarily disables XR,
      background and auto-clear, then restores them.
-   - Queues an async GPU→CPU readback (`readRenderTargetPixelsAsync`: pixel
-     buffer object + fence, no stall).
+   - Queues an async GPU→CPU readback of both attachments
+     (`readRenderTargetPixelsAsync`: pixel buffer object + fence, no stall).
    - Emits `onFrame` synchronously with the poses used.
 2. `flow-material.ts`: vertex shader transforms each vertex into current eye
    space, previous eye space and "rig-only" previous eye space. The CPU passes
    the current→previous eye transforms as near-identity matrices computed in
    float64, which keeps float32 precision good for tiny per-frame motions. The
-   fragment shader writes the field (layout below). Angles use
+   fragment shader writes both fields (layout below). Angles use
    `atan(|a×b|, a·b)`, which is accurate for small angles, unlike `acos`.
 3. `flow-stats.ts`: when the readback arrives, the per-pixel values are reduced
    to a `FlowMeasurement` and `onSample` fires, usually a few ms / 1–3 frames
    after `onFrame`.
    - Pixels are weighted by the solid angle they subtend (cos³ of their angle to
      the optical axis), so means are per visual field area, not per pixel.
-   - Eccentricity bands: 0–10°, 10–30°, 30°+ from the view's forward axis
-     (`ECCENTRICITY_BANDS_DEG`).
+   - Per component: mean and max angular speed, eccentricity bands (0–10°,
+     10–30°, 30°+ from the view's forward axis, `ECCENTRICITY_BANDS_DEG`), and
+     the mean signed horizontal angular velocity over the covered pixels of the
+     left and right half of the view (`horizontal`). A pure yaw moves both
+     halves alike, forward motion moves them apart.
    - The combined measurement is the mean over views (both eyes).
 
 A frame is not measured (`flow: null` in the log) when the view layout changes
@@ -69,15 +74,16 @@ previous pose.
 
 ### Flow field layout
 
-A `Float32Array`, row-major, bottom row first (WebGL order), 4 channels per pixel:
+One field per view and component (`ViewFlow.fields.total`, `.rigInduced`). A
+`Float32Array`, row-major, bottom row first (WebGL order), 4 channels per pixel:
 
 | ch | meaning |
 |---|---|
-| 0, 1 | total flow in NDC units per second (x right, y up), i.e. direction on screen |
-| 2 | total angular speed, °/s |
-| 3 | rig-induced angular speed, °/s |
+| 0, 1 | flow in NDC units per second (x right, y up), i.e. direction on screen |
+| 2 | angular speed, °/s |
+| 3 | signed horizontal angular velocity (change of eye-space azimuth), °/s, positive = rightward. Independent of depth for a pure yaw. |
 
-Pixels without geometry: `(0, 0, -1, -1)`.
+Pixels without geometry: `(0, 0, -1, 0)`.
 
 ## Live API (for countermeasures)
 
@@ -88,9 +94,10 @@ const flow = getOpticalFlow(sceneEl);
 
 flow.latest;                         // FlowSample | null, most recent measurement
 const stop = flow.onSample((s) => {  // every measured frame
-  s.combined.rigInduced.meanDegPerSec;     // overall "conflict" flow
-  s.combined.bands[2].rigInducedMeanDegPerSec; // peripheral (30°+) conflict flow
-  s.views[0].field;                          // raw per-pixel field, see above
+  s.combined.rigInduced.meanDegPerSec;          // overall "conflict" flow
+  s.combined.rigInduced.bands[2].meanDegPerSec; // peripheral (30°+) conflict flow
+  s.combined.rigInduced.horizontal;             // left/right half lateral flow
+  s.views[0].fields.rigInduced;                 // raw per-pixel field, see above
 });
 flow.onFrame((f) => { /* poses of every rendered frame, synchronous */ });
 await flow.flush();                  // wait for in-flight readbacks
@@ -99,8 +106,8 @@ await flow.flush();                  // wait for in-flight readbacks
 Types are in `src/optical-flow/types.ts`. Configure it on the scene:
 `optical-flow="enabled: true; fieldHeight: 64"`.
 
-Cost: one extra render of the landscape per view at 64×~64 px per frame, plus a
-64 KB readback per view. This should be negligible on a Quest, but it has not
+Cost: one extra render of the landscape per view at 64×~64 px per frame (two
+color attachments), plus two 64 KB readbacks per view. This should be negligible on a Quest, but it has not
 been profiled on a device yet.
 
 ## Session log
@@ -108,13 +115,17 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 1):
+(`SessionLog`, format version 2):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
+- `turnCues`: the `turn-cues` configuration (condition) of the session.
 - `scene`: landscape glTF path and world matrix, `tour-flight` settings.
   Together with the per-frame poses, this is enough to re-render every frame
   offline.
-- `events`: `enter-vr` / `exit-vr` with times.
+- `events`: `enter-vr` / `exit-vr`, and `turn-cue` (direction, triggering
+  turn rate, whether it was presented) with times.
+- `turnSignals[]`: every turn-rate sample of the cue detector, raw and
+  smoothed, keyed by `sceneTimeMs`.
 - `frames[]`, one per rendered frame:
   - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `pathTimeSec`,
     `xrPresenting`
@@ -122,11 +133,12 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
     field size); all matrices column-major, as in three.js
   - `flow`: combined and per-view `FlowMeasurement`, or `null` if not measured
   - `fields` (every `fieldSnapshotIntervalMs`, default 500 ms): the raw live
-    flow fields as base64 little-endian float32. Their only purpose is to
-    validate the live measurement offline.
+    flow fields of both components per view (`total`, `rigInduced`) as base64
+    little-endian float32. Their only purpose is to validate the live
+    measurement offline.
 
-Size is roughly 3 MB per 10 s on desktop, almost all of it field snapshots
-(about 155 KB each for a 114×64 view). Per-frame poses and measurements add
+Size is roughly 6 MB per 10 s on desktop, almost all of it field snapshots
+(about 155 KB per component for a 114×64 view). Per-frame poses and measurements add
 about 2 KB per frame on desktop.
 
 ## Offline replay and validation
@@ -141,19 +153,21 @@ uv run replay_session.py ~/Downloads/optical-flow-….json --all-frames --every 
 
 It loads the landscape glTF with trimesh, applies the logged world matrix, and
 ray casts every flow pixel (Embree) from the logged eye poses. From that it
-recomputes the flow independently of the browser and writes:
+recomputes both flow fields independently of the browser and writes:
 
 - `timeseries.png`: live total vs. rig-induced mean, eccentricity bands,
-  coverage, frame time, XR events.
+  coverage, frame time, XR events, and the turn signal with thresholds and
+  cues.
 - `frames/*.png` and `replay.mp4`, four panels per view:
   - a textured reconstruction of what the user saw
   - live flow (hue = direction, brightness = speed, arrows = screen motion over
     0.1 s)
   - recomputed flow
   - |live − recomputed| (white = 5 °/s; magenta = coverage disagreement)
-- `validation.json`: error statistics per snapshot.
+- `validation.json`: error statistics per snapshot and component (angular
+  speed and horizontal channel).
 
-A first desktop recording (headless Chrome, 107 frames) gave:
+A first desktop recording (log format 1) (headless Chrome, 107 frames) gave:
 
 - coverage agreement 99.999%
 - median absolute error 0.003 °/s
@@ -169,10 +183,8 @@ A first desktop recording (headless Chrome, 107 frames) gave:
   or not it has texture or contrast. Weighting by local image contrast would be
   a possible next step.
 - **No eye tracking:** retinal flow under smooth pursuit is not modelled.
-- **Artefacts of the current flight:**
-  - `tour-flight` interpolates the path linearly between keyframes 0.2 s apart,
-    so the flow changes in 5 Hz steps (visible in `timeseries.png`).
-  - When the path loops (`time % duration`), the camera jumps, which produces a
-    one-frame flow spike.
+- **Seam of the flight loop:** the exported path is not exactly closed; the
+  closing segment from the last keyframe back to the first has a small (~5°)
+  kink, which shows up as a brief bump in flow once per lap.
 - **Units:** the field's NDC channels are per second, so screen-space direction
   and speed depend on the view's projection. The angular channels do not.

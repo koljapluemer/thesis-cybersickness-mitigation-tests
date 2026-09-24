@@ -1,6 +1,6 @@
 {
   "source": "TourPath",
-  "duration": 60,
+  "duration": 120,
   "samples": 600,
   "coordinateMapping": "aframe = [blender.x, blender.z, -blender.y]",
   "points": [

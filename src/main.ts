@@ -4,6 +4,7 @@ import './style.css';
 import './tour-flight';
 import type { TourFlightComponent } from './tour-flight';
 import { getOpticalFlow } from './optical-flow/optical-flow-system';
+import { getTurnCues } from './turn-cues/turn-cue-system';
 import { FlowSessionRecorder } from './optical-flow/session-recorder';
 import { mountRecordingButton } from './recording-button';
 
@@ -22,6 +23,7 @@ app.innerHTML = `
     background="color: #dcecf8"
     vr-mode-ui="enabled: true"
     optical-flow="fieldHeight: 64"
+    turn-cues="source: optical-flow; output: stereo-tone"
   >
     <a-assets>
       <a-asset-item id="mountain-landscape" src="${LANDSCAPE_SRC}"></a-asset-item>
@@ -61,7 +63,7 @@ if (!sceneEl || !landscapeEl || !rigEl) {
 
 sceneEl.addEventListener('loaded', () => {
   const tourFlight = rigEl.components['tour-flight'] as unknown as TourFlightComponent;
-  const recorder = new FlowSessionRecorder(sceneEl, getOpticalFlow(sceneEl), {
+  const recorder = new FlowSessionRecorder(sceneEl, getOpticalFlow(sceneEl), getTurnCues(sceneEl), {
     fieldSnapshotIntervalMs: 500,
     pathTimeSec: () => tourFlight.pathTimeSec,
     describeScene: () => {

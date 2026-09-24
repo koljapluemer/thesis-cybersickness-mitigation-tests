@@ -4,7 +4,9 @@ import type { Matrix4, RawShaderMaterial } from 'three';
 const THREE = AFRAME.THREE;
 
 /**
- * Renders the per-pixel flow field (see `FlowField` for the channel layout).
+ * Renders the per-pixel flow fields into two color attachments: attachment 0 is
+ * the total flow, attachment 1 the rig-induced flow (see `FlowField` for the
+ * channel layout, which both share).
  *
  * The CPU passes, per view, the transforms that map a point from the current
  * eye space into the previous eye space (`uToPrevEye`) and into the previous
@@ -44,25 +46,40 @@ in vec3 vEye;
 in vec3 vPrevEye;
 in vec3 vRigPrevEye;
 
-out vec4 outFlow;
+layout(location = 0) out vec4 outTotal;
+layout(location = 1) out vec4 outRig;
 
 float angleDeg(vec3 a, vec3 b) {
   return degrees(atan(length(cross(a, b)), dot(a, b)));
 }
 
-void main() {
-  vec3 current = normalize(vEye);
-  vec4 clipCurrent = projectionMatrix * vec4(vEye, 1.0);
-  vec4 clipPrev = projectionMatrix * vec4(vPrevEye, 1.0);
+// Signed change of eye-space azimuth from prev to current, positive = rightward.
+// Uses (forward, right) = (-z, x); atan of cross and dot is accurate for small angles.
+float azimuthChangeDeg(vec3 prev, vec3 current) {
+  vec2 p = vec2(-prev.z, prev.x);
+  vec2 c = vec2(-current.z, current.x);
+  return degrees(atan(p.x * c.y - p.y * c.x, dot(p, c)));
+}
+
+vec4 flow(vec3 prevEye, vec4 clipCurrent, vec3 current) {
+  vec4 clipPrev = projectionMatrix * vec4(prevEye, 1.0);
   vec2 ndcFlow = clipPrev.w > 0.0
     ? clipCurrent.xy / clipCurrent.w - clipPrev.xy / clipPrev.w
     : vec2(0.0);
 
-  outFlow = vec4(
-    ndcFlow * uInvDeltaSec,
-    angleDeg(normalize(vPrevEye), current) * uInvDeltaSec,
-    angleDeg(normalize(vRigPrevEye), current) * uInvDeltaSec
-  );
+  return vec4(
+    ndcFlow,
+    angleDeg(normalize(prevEye), current),
+    azimuthChangeDeg(prevEye, vEye)
+  ) * uInvDeltaSec;
+}
+
+void main() {
+  vec3 current = normalize(vEye);
+  vec4 clipCurrent = projectionMatrix * vec4(vEye, 1.0);
+
+  outTotal = flow(vPrevEye, clipCurrent, current);
+  outRig = flow(vRigPrevEye, clipCurrent, current);
 }
 `;
 

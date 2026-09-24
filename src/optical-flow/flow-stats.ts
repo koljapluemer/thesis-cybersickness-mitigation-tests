@@ -1,6 +1,6 @@
 import 'aframe';
 import type { Matrix4 } from 'three';
-import type { EccentricityBand, FlowField, FlowMeasurement } from './types';
+import type { FlowComponent, FlowComponentStats, FlowField, FlowMeasurement } from './types';
 
 const THREE = AFRAME.THREE;
 
@@ -9,14 +9,17 @@ export const ECCENTRICITY_BANDS_DEG = [0, 10, 30, 180] as const;
 
 /**
  * Per-pixel geometry of one view's flow field: which eccentricity band a pixel
- * belongs to and which solid angle it subtends (relative; cos³ of its angle to
- * the optical axis, exact for a planar perspective projection).
+ * belongs to, which half of the view it is in (eye-space x < 0 or not, correct
+ * for asymmetric frusta) and which solid angle it subtends (relative; cos³ of
+ * its angle to the optical axis, exact for a planar perspective projection).
  */
 export type ViewGeometry = {
   width: number;
   height: number;
   projection: number[];
   band: Uint8Array;
+  /** 1 for pixels in the right half of the view, 0 for the left half. */
+  right: Uint8Array;
   weight: Float32Array;
   totalWeight: number;
   bandWeight: Float64Array;
@@ -34,6 +37,7 @@ export function createViewGeometry(width: number, height: number, projection: Ma
   const point = new THREE.Vector3();
   const pixelCount = width * height;
   const band = new Uint8Array(pixelCount);
+  const right = new Uint8Array(pixelCount);
   const weight = new Float32Array(pixelCount);
   const bandWeight = new Float64Array(ECCENTRICITY_BANDS_DEG.length - 1);
   let totalWeight = 0;
@@ -51,6 +55,7 @@ export function createViewGeometry(width: number, height: number, projection: Ma
       }
 
       band[pixel] = bandIndex;
+      right[pixel] = point.x >= 0 ? 1 : 0;
       weight[pixel] = cosine ** 3;
       bandWeight[bandIndex] += weight[pixel];
       totalWeight += weight[pixel];
@@ -62,84 +67,102 @@ export function createViewGeometry(width: number, height: number, projection: Ma
     height,
     projection: [...projection.elements],
     band,
+    right,
     weight,
     totalWeight,
     bandWeight,
   };
 }
 
-export function measureField(field: FlowField, geometry: ViewGeometry): FlowMeasurement {
-  const { data } = field;
-  const bandTotal = new Float64Array(geometry.bandWeight.length);
-  const bandRig = new Float64Array(geometry.bandWeight.length);
+/** Running sums of one flow component over a view. */
+class ComponentAccumulator {
+  sum = 0;
+  max = 0;
+  readonly bandSums: Float64Array;
+  readonly sideSums = new Float64Array(2);
+
+  constructor(bandCount: number) {
+    this.bandSums = new Float64Array(bandCount);
+  }
+
+  add(data: Float32Array, pixel: number, weight: number, band: number, side: number): void {
+    const speed = data[pixel * 4 + 2];
+    this.sum += weight * speed;
+    this.max = Math.max(this.max, speed);
+    this.bandSums[band] += weight * speed;
+    this.sideSums[side] += weight * data[pixel * 4 + 3];
+  }
+
+  stats(geometry: ViewGeometry, sideCoveredWeight: Float64Array): FlowComponentStats {
+    const sideMean = (side: number) => sideCoveredWeight[side] > 0 ? this.sideSums[side] / sideCoveredWeight[side] : 0;
+
+    return {
+      meanDegPerSec: this.sum / geometry.totalWeight,
+      maxDegPerSec: this.max,
+      bands: Array.from(geometry.bandWeight, (bandWeight, band) => ({
+        minEccentricityDeg: ECCENTRICITY_BANDS_DEG[band],
+        maxEccentricityDeg: ECCENTRICITY_BANDS_DEG[band + 1],
+        meanDegPerSec: bandWeight > 0 ? this.bandSums[band] / bandWeight : 0,
+      })),
+      horizontal: { leftMeanDegPerSec: sideMean(0), rightMeanDegPerSec: sideMean(1) },
+    };
+  }
+}
+
+export function measureFields(fields: Record<FlowComponent, FlowField>, geometry: ViewGeometry): FlowMeasurement {
+  const bandCount = geometry.bandWeight.length;
+  const total = new ComponentAccumulator(bandCount);
+  const rigInduced = new ComponentAccumulator(bandCount);
+  const sideCoveredWeight = new Float64Array(2);
   let coveredWeight = 0;
-  let sumTotal = 0;
-  let sumRig = 0;
-  let maxTotal = 0;
-  let maxRig = 0;
 
   for (let pixel = 0; pixel < geometry.weight.length; pixel += 1) {
-    const total = data[pixel * 4 + 2];
-
-    if (total < 0) {
+    // Both components cover the same pixels.
+    if (fields.total.data[pixel * 4 + 2] < 0) {
       continue;
     }
 
-    const rig = data[pixel * 4 + 3];
     const weight = geometry.weight[pixel];
     const band = geometry.band[pixel];
+    const side = geometry.right[pixel];
 
     coveredWeight += weight;
-    sumTotal += weight * total;
-    sumRig += weight * rig;
-    bandTotal[band] += weight * total;
-    bandRig[band] += weight * rig;
-    maxTotal = Math.max(maxTotal, total);
-    maxRig = Math.max(maxRig, rig);
-  }
-
-  const bands: EccentricityBand[] = [];
-
-  for (let band = 0; band < geometry.bandWeight.length; band += 1) {
-    const bandWeight = geometry.bandWeight[band];
-    bands.push({
-      minEccentricityDeg: ECCENTRICITY_BANDS_DEG[band],
-      maxEccentricityDeg: ECCENTRICITY_BANDS_DEG[band + 1],
-      totalMeanDegPerSec: bandWeight > 0 ? bandTotal[band] / bandWeight : 0,
-      rigInducedMeanDegPerSec: bandWeight > 0 ? bandRig[band] / bandWeight : 0,
-    });
+    sideCoveredWeight[side] += weight;
+    total.add(fields.total.data, pixel, weight, band, side);
+    rigInduced.add(fields.rigInduced.data, pixel, weight, band, side);
   }
 
   return {
     coverage: coveredWeight / geometry.totalWeight,
-    total: { meanDegPerSec: sumTotal / geometry.totalWeight, maxDegPerSec: maxTotal },
-    rigInduced: { meanDegPerSec: sumRig / geometry.totalWeight, maxDegPerSec: maxRig },
-    bands,
+    total: total.stats(geometry, sideCoveredWeight),
+    rigInduced: rigInduced.stats(geometry, sideCoveredWeight),
   };
 }
 
-export function combineMeasurements(measurements: FlowMeasurement[]): FlowMeasurement {
-  const count = measurements.length;
-  const mean = (pick: (measurement: FlowMeasurement) => number) =>
-    measurements.reduce((sum, measurement) => sum + pick(measurement), 0) / count;
-  const max = (pick: (measurement: FlowMeasurement) => number) =>
-    Math.max(...measurements.map(pick));
+function combineComponents(components: FlowComponentStats[]): FlowComponentStats {
+  const mean = (pick: (component: FlowComponentStats) => number) =>
+    components.reduce((sum, component) => sum + pick(component), 0) / components.length;
 
   return {
-    coverage: mean((measurement) => measurement.coverage),
-    total: {
-      meanDegPerSec: mean((measurement) => measurement.total.meanDegPerSec),
-      maxDegPerSec: max((measurement) => measurement.total.maxDegPerSec),
-    },
-    rigInduced: {
-      meanDegPerSec: mean((measurement) => measurement.rigInduced.meanDegPerSec),
-      maxDegPerSec: max((measurement) => measurement.rigInduced.maxDegPerSec),
-    },
-    bands: measurements[0].bands.map((band, index) => ({
+    meanDegPerSec: mean((component) => component.meanDegPerSec),
+    maxDegPerSec: Math.max(...components.map((component) => component.maxDegPerSec)),
+    bands: components[0].bands.map((band, index) => ({
       minEccentricityDeg: band.minEccentricityDeg,
       maxEccentricityDeg: band.maxEccentricityDeg,
-      totalMeanDegPerSec: mean((measurement) => measurement.bands[index].totalMeanDegPerSec),
-      rigInducedMeanDegPerSec: mean((measurement) => measurement.bands[index].rigInducedMeanDegPerSec),
+      meanDegPerSec: mean((component) => component.bands[index].meanDegPerSec),
     })),
+    horizontal: {
+      leftMeanDegPerSec: mean((component) => component.horizontal.leftMeanDegPerSec),
+      rightMeanDegPerSec: mean((component) => component.horizontal.rightMeanDegPerSec),
+    },
+  };
+}
+
+/** Mean over views (both eyes in VR); maxima are the maximum over views. */
+export function combineMeasurements(measurements: FlowMeasurement[]): FlowMeasurement {
+  return {
+    coverage: measurements.reduce((sum, measurement) => sum + measurement.coverage, 0) / measurements.length,
+    total: combineComponents(measurements.map((measurement) => measurement.total)),
+    rigInduced: combineComponents(measurements.map((measurement) => measurement.rigInduced)),
   };
 }

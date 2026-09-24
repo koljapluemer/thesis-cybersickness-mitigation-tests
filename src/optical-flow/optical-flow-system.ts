@@ -2,13 +2,16 @@ import 'aframe';
 import type { Entity, Scene, System } from 'aframe';
 import type { Camera, Matrix4, Object3D, PerspectiveCamera, WebGLRenderTarget } from 'three';
 import { createFlowMaterial, type FlowMaterial } from './flow-material';
-import { combineMeasurements, createViewGeometry, measureField, viewGeometryMatches, type ViewGeometry } from './flow-stats';
-import type { Eye, FlowFrame, FlowSample, Unsubscribe, ViewFlow, ViewPose } from './types';
+import { combineMeasurements, createViewGeometry, measureFields, viewGeometryMatches, type ViewGeometry } from './flow-stats';
+import type { Eye, FlowComponent, FlowFrame, FlowSample, Unsubscribe, ViewFlow, ViewPose } from './types';
 
 const THREE = AFRAME.THREE;
 
 /** Clear value for pixels without geometry, see `FlowField`. */
-const BACKGROUND = new Float32Array([0, 0, -1, -1]);
+const BACKGROUND = new Float32Array([0, 0, -1, 0]);
+
+/** Color attachment of each flow component in the flow render target. */
+const ATTACHMENTS: Record<FlowComponent, number> = { total: 0, rigInduced: 1 };
 
 type OpticalFlowData = {
   enabled: boolean;
@@ -150,6 +153,7 @@ AFRAME.registerSystem('optical-flow', {
           magFilter: THREE.NearestFilter,
           depthBuffer: true,
           generateMipmaps: false,
+          count: Object.keys(ATTACHMENTS).length,
         }),
         prevMatrixWorld: new THREE.Matrix4(),
       }));
@@ -244,7 +248,8 @@ AFRAME.registerSystem('optical-flow', {
 
     renderer.setRenderTarget(slot.target);
     renderer.state.buffers.color.setMask(true);
-    (renderer.getContext() as WebGL2RenderingContext).clearBufferfv(WebGL2RenderingContext.COLOR, 0, BACKGROUND);
+    const gl = renderer.getContext() as WebGL2RenderingContext;
+    Object.values(ATTACHMENTS).forEach((attachment) => gl.clearBufferfv(gl.COLOR, attachment, BACKGROUND));
     renderer.clear(false, true, false);
     renderer.render(this.sceneEl.object3D, flowCamera);
 
@@ -259,17 +264,25 @@ AFRAME.registerSystem('optical-flow', {
 
   async readSample(this: OpticalFlowInternals, frame: FlowFrame, slots: ViewSlot[]): Promise<void> {
     const renderer = this.sceneEl.renderer;
-    const reads = frame.views.map((view, index) => {
+    const readField = async (view: ViewPose, slot: ViewSlot, component: FlowComponent) => {
       const data = new Float32Array(view.fieldWidth * view.fieldHeight * 4);
-      return renderer.readRenderTargetPixelsAsync(slots[index].target, 0, 0, view.fieldWidth, view.fieldHeight, data);
-    });
+      await renderer.readRenderTargetPixelsAsync(slot.target, 0, 0, view.fieldWidth, view.fieldHeight, data, undefined, ATTACHMENTS[component]);
+      return { width: view.fieldWidth, height: view.fieldHeight, data };
+    };
     const geometries = slots.map((slot) => slot.geometry as ViewGeometry);
-    const fields = await Promise.all(reads);
+    const fields = await Promise.all(frame.views.map(async (view, index) => {
+      const [total, rigInduced] = await Promise.all([
+        readField(view, slots[index], 'total'),
+        readField(view, slots[index], 'rigInduced'),
+      ]);
+      return { total, rigInduced };
+    }));
 
-    const views: ViewFlow[] = frame.views.map((view, index) => {
-      const field = { width: view.fieldWidth, height: view.fieldHeight, data: fields[index] as Float32Array };
-      return { eye: view.eye, field, ...measureField(field, geometries[index]) };
-    });
+    const views: ViewFlow[] = frame.views.map((view, index) => ({
+      eye: view.eye,
+      fields: fields[index],
+      ...measureFields(fields[index], geometries[index]),
+    }));
     const sample: FlowSample = {
       frame: frame.frame,
       sceneTimeMs: frame.sceneTimeMs,
