@@ -17,7 +17,12 @@ head-locked HUD rotation indicators have since been removed.
 
 | File | Role |
 |---|---|
-| `src/main.ts` | Entire application: scene bootstrap + all A-Frame components/shaders. Single file by design (see `AGENTS.md`). |
+| `src/main.ts` | Scene markup and wiring of the flow recorder and its button. |
+| `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path. |
+| `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
+| `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
+| `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
+| `analysis/` | uv project; `replay_session.py` replays a session log offline and validates the live flow measurement. |
 | `src/style.css` | Fullscreen layout reset for the embedded `<a-scene>`. |
 | `index.html` | Entry point, mounts the scene into `#app`, loads a GoatCounter analytics beacon. |
 | `public/tour-path.json` | `{ duration, points: [{ t, position }] }` — the pre-baked flight path (600 samples over 120s), keyframe-interpolated at runtime. |
@@ -25,7 +30,7 @@ head-locked HUD rotation indicators have since been removed.
 | `public/mountains/` | The glTF landscape flown over. |
 | `issues/` | Free-form dev notes/TODOs, not formal issue tracking. |
 
-## Scene structure (`src/main.ts`)
+## Scene structure
 
 - **`tour-flight` component** — drives the camera rig. On `init` it fetches
   `tour-path.json`; on every `tick` it samples the current position and a
@@ -39,6 +44,11 @@ head-locked HUD rotation indicators have since been removed.
   cannot steer, only physically rotate their head inside the HMD. In VR mode,
   WebXR still writes the headset's real orientation onto the camera object on
   top of whatever the `tour-flight` component sets on its parent.
+- **`optical-flow` system** (configured on `<a-scene>`) — measures the optical
+  flow of every rendered frame per eye, split into total flow and flow caused
+  by the rig motion alone. Its API is `getOpticalFlow(sceneEl)`. The
+  "Record optical flow" button logs every frame and downloads the log as JSON.
+  Details: `doc/optical-flow.md`.
 
 ## Running
 
@@ -48,4 +58,4 @@ npm run build   # tsc + vite build
 npm run lint
 ```
 
-(Do not run `npm run dev` / `vite` in this environment — see `AGENTS.md`.)
+(Do not run `npm run dev` / `vite` in this environment — see `CLAUDE.md`.)

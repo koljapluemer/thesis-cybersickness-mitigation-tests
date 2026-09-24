@@ -1,0 +1,225 @@
+import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
+import type { OpticalFlowSystem } from './optical-flow-system';
+import type { Eye, FlowField, FlowFrame, FlowMeasurement, FlowSample, Unsubscribe, ViewPose } from './types';
+
+/** Static description of the scene, needed to reproduce the rendered views offline. */
+export type SceneDescription = {
+  landscape: {
+    src: string;
+    /** World matrix of the glTF root, column-major. */
+    matrixWorld: number[];
+  };
+  tour: Record<string, unknown>;
+};
+
+export type LoggedField = {
+  eye: Eye;
+  width: number;
+  height: number;
+  /** Base64 of little-endian float32 data, layout as in `FlowField`. */
+  data: string;
+};
+
+export type LoggedFrame = {
+  frame: number;
+  /** Milliseconds since recording start (wall clock). */
+  timeMs: number;
+  sceneTimeMs: number;
+  deltaMs: number;
+  /** Position on the tour path in seconds. */
+  pathTimeSec: number;
+  xrPresenting: boolean;
+  rigMatrixWorld: number[];
+  views: ViewPose[];
+  /** Null for frames that could not be measured (first frame, view layout change). */
+  flow: {
+    combined: FlowMeasurement;
+    views: (FlowMeasurement & { eye: Eye })[];
+  } | null;
+  fields?: LoggedField[];
+};
+
+export type SessionLog = {
+  format: 'optical-flow-session';
+  version: 1;
+  startedAt: string;
+  endedAt: string;
+  userAgent: string;
+  flowMeter: {
+    fieldHeight: number;
+    eccentricityBandsDeg: readonly number[];
+    fieldChannels: readonly string[];
+    fieldSnapshotIntervalMs: number;
+  };
+  scene: SceneDescription;
+  events: { timeMs: number; type: string }[];
+  frames: LoggedFrame[];
+};
+
+export type RecorderOptions = {
+  describeScene: () => SceneDescription;
+  pathTimeSec: () => number;
+  /** How often full flow fields are embedded in the log. */
+  fieldSnapshotIntervalMs: number;
+};
+
+const FIELD_CHANNELS = ['ndcFlowX', 'ndcFlowY', 'totalDegPerSec', 'rigInducedDegPerSec'] as const;
+const XR_EVENTS = ['enter-vr', 'exit-vr'] as const;
+
+function encodeField(field: FlowField): string {
+  const bytes = new Uint8Array(field.data.buffer, field.data.byteOffset, field.data.byteLength);
+  const chunks: string[] = [];
+
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+
+  return btoa(chunks.join(''));
+}
+
+/**
+ * Records every rendered frame's poses and flow measurements while running.
+ * The log is complete enough to re-render and re-measure the session offline.
+ */
+export class FlowSessionRecorder {
+  private readonly sceneEl: Element;
+  private readonly meter: OpticalFlowSystem;
+  private readonly options: RecorderOptions;
+  private log: SessionLog | null = null;
+  private startTime = 0;
+  private lastSnapshotSceneTimeMs = -Infinity;
+  private readonly framesByNumber = new Map<number, LoggedFrame>();
+  private unsubscribers: Unsubscribe[] = [];
+
+  constructor(sceneEl: Element, meter: OpticalFlowSystem, options: RecorderOptions) {
+    this.sceneEl = sceneEl;
+    this.meter = meter;
+    this.options = options;
+  }
+
+  get recording(): boolean {
+    return this.log !== null;
+  }
+
+  get frameCount(): number {
+    return this.log?.frames.length ?? 0;
+  }
+
+  start(): void {
+    if (this.log) {
+      throw new Error('Recording already running.');
+    }
+
+    this.startTime = performance.now();
+    this.lastSnapshotSceneTimeMs = -Infinity;
+    this.framesByNumber.clear();
+    this.log = {
+      format: 'optical-flow-session',
+      version: 1,
+      startedAt: new Date().toISOString(),
+      endedAt: '',
+      userAgent: navigator.userAgent,
+      flowMeter: {
+        fieldHeight: this.meter.data.fieldHeight,
+        eccentricityBandsDeg: ECCENTRICITY_BANDS_DEG,
+        fieldChannels: FIELD_CHANNELS,
+        fieldSnapshotIntervalMs: this.options.fieldSnapshotIntervalMs,
+      },
+      scene: this.options.describeScene(),
+      events: [],
+      frames: [],
+    };
+
+    const onXrEvent = (event: Event) => this.log?.events.push({ timeMs: this.elapsedMs(), type: event.type });
+    XR_EVENTS.forEach((type) => this.sceneEl.addEventListener(type, onXrEvent));
+
+    this.unsubscribers = [
+      this.meter.onFrame((frame) => this.recordFrame(frame)),
+      this.meter.onSample((sample) => this.recordSample(sample)),
+      () => XR_EVENTS.forEach((type) => this.sceneEl.removeEventListener(type, onXrEvent)),
+    ];
+  }
+
+  /** Stops recording once all in-flight measurements have arrived and returns the log. */
+  async stop(): Promise<SessionLog> {
+    const log = this.log;
+
+    if (!log) {
+      throw new Error('No recording running.');
+    }
+
+    this.unsubscribers[0]();
+    await this.meter.flush();
+    this.unsubscribers.slice(1).forEach((unsubscribe) => unsubscribe());
+    this.unsubscribers = [];
+    this.framesByNumber.clear();
+    this.log = null;
+    log.endedAt = new Date().toISOString();
+
+    return log;
+  }
+
+  private elapsedMs(): number {
+    return performance.now() - this.startTime;
+  }
+
+  private recordFrame(frame: FlowFrame): void {
+    const logged: LoggedFrame = {
+      frame: frame.frame,
+      timeMs: this.elapsedMs(),
+      sceneTimeMs: frame.sceneTimeMs,
+      deltaMs: frame.deltaMs,
+      pathTimeSec: this.options.pathTimeSec(),
+      xrPresenting: frame.xrPresenting,
+      rigMatrixWorld: frame.rigMatrixWorld,
+      views: frame.views,
+      flow: null,
+    };
+
+    this.log?.frames.push(logged);
+
+    if (frame.views.some((view) => view.fieldWidth > 0)) {
+      this.framesByNumber.set(frame.frame, logged);
+    }
+  }
+
+  private recordSample(sample: FlowSample): void {
+    const logged = this.framesByNumber.get(sample.frame);
+
+    if (!logged) {
+      return;
+    }
+
+    this.framesByNumber.delete(sample.frame);
+    logged.flow = {
+      combined: sample.combined,
+      views: sample.views.map((view) => ({
+        eye: view.eye,
+        coverage: view.coverage,
+        total: view.total,
+        rigInduced: view.rigInduced,
+        bands: view.bands,
+      })),
+    };
+
+    if (sample.sceneTimeMs - this.lastSnapshotSceneTimeMs >= this.options.fieldSnapshotIntervalMs) {
+      this.lastSnapshotSceneTimeMs = sample.sceneTimeMs;
+      logged.fields = sample.views.map((view) => ({
+        eye: view.eye,
+        width: view.field.width,
+        height: view.field.height,
+        data: encodeField(view.field),
+      }));
+    }
+  }
+}
+
+export function downloadJson(value: unknown, filename: string): void {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  // Revoking synchronously can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
