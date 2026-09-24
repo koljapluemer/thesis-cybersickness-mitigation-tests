@@ -45,7 +45,6 @@ app.innerHTML = `
       <a-camera
         fov="60"
         position="0 0 0"
-        look-controls-enabled="false"
         wasd-controls-enabled="false"
       ></a-camera>
     </a-entity>

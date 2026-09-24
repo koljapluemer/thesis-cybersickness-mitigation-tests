@@ -40,10 +40,11 @@ head-locked HUD rotation indicators have since been removed.
   calls `object3D.lookAt(lookTarget)` before applying a fixed pitch tilt. This
   is what makes the camera *bank and turn on its own*.
 - The `<a-camera>` is nested inside the `tour-flight` entity with
-  `look-controls-enabled="false"` and `wasd-controls-enabled="false"`: the user
-  cannot steer, only physically rotate their head inside the HMD. In VR mode,
-  WebXR still writes the headset's real orientation onto the camera object on
-  top of whatever the `tour-flight` component sets on its parent.
+  `wasd-controls-enabled="false"`: the user cannot steer, only rotate their
+  view. In VR mode, WebXR writes the headset's real orientation onto the camera
+  object on top of whatever the `tour-flight` component sets on its parent. On
+  desktop, A-Frame's default `look-controls` provide mouse-drag look as a
+  debugging stand-in for head rotation (recorded as head motion, like in VR).
 - **`optical-flow` system** (configured on `<a-scene>`) — measures the optical
   flow of every rendered frame per eye, split into total flow and flow caused
   by the rig motion alone. Its API is `getOpticalFlow(sceneEl)`. The
