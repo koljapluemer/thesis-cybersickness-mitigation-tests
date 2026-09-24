@@ -1,5 +1,5 @@
 import type { AudioSystem } from '../audio/audio-system';
-import type { CueOutput, TurnDirection } from './types';
+import type { TurnDirection, TurnOutput } from './types';
 
 export type StereoToneOptions = {
   frequencyHz: number;
@@ -16,7 +16,7 @@ export type StereoToneOptions = {
  * anchor the sound in the world. Plays through the shared `audio` system's
  * context; while that is still locked, cues are not presented.
  */
-export class StereoToneOutput implements CueOutput {
+export class StereoToneOutput implements TurnOutput {
   private readonly audio: AudioSystem;
   private readonly options: StereoToneOptions;
   private readonly playing = new Set<OscillatorNode>();
@@ -25,6 +25,9 @@ export class StereoToneOutput implements CueOutput {
     this.audio = audio;
     this.options = options;
   }
+
+  /** Only discrete cues are presented. */
+  signal(): void {}
 
   present(direction: TurnDirection): boolean {
     const context = this.audio.runningContext();

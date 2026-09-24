@@ -3,16 +3,21 @@ import type { Scene, System } from 'aframe';
 import { getAudio } from '../audio/audio-system';
 import { getOpticalFlow } from '../optical-flow/optical-flow-system';
 import type { Unsubscribe } from '../optical-flow/types';
+import { FlexibleToneOutput } from './flexible-tone-output';
 import { createOpticalFlowTurnSource } from './optical-flow-turn-source';
 import { StereoToneOutput } from './stereo-tone-output';
 import { TurnDetector } from './turn-detector';
-import type { CueOutput, TurnCue, TurnSignal, TurnSignalSource } from './types';
+import type { TurnCue, TurnOutput, TurnSignal, TurnSignalSource } from './types';
 
 export type TurnCueData = {
   /** Where the turn rate comes from; `none` disables detection. */
   source: 'optical-flow' | 'none';
-  /** How cues are presented; with `none` they are still detected and logged. */
-  output: 'stereo-tone' | 'none';
+  /**
+   * How turns are presented: `stereo-tone` plays a tone per detected cue,
+   * `flexible-tone` a continuous tone following the smoothed turn rate. With
+   * `none` cues are still detected and logged.
+   */
+  output: 'stereo-tone' | 'flexible-tone' | 'none';
   onThresholdDegPerSec: number;
   offThresholdDegPerSec: number;
   smoothingMs: number;
@@ -20,16 +25,24 @@ export type TurnCueData = {
   toneDurationMs: number;
   fadeMs: number;
   gain: number;
+  /** `flexible-tone`: smoothed turn rate at which a channel reaches `gain`. */
+  fullScaleDegPerSec: number;
 };
 
 const SOURCES: Record<Exclude<TurnCueData['source'], 'none'>, (sceneEl: Scene) => TurnSignalSource> = {
   'optical-flow': (sceneEl) => createOpticalFlowTurnSource(getOpticalFlow(sceneEl)),
 };
 
-const OUTPUTS: Record<Exclude<TurnCueData['output'], 'none'>, (sceneEl: Scene, data: TurnCueData) => CueOutput> = {
+const OUTPUTS: Record<Exclude<TurnCueData['output'], 'none'>, (sceneEl: Scene, data: TurnCueData) => TurnOutput> = {
   'stereo-tone': (sceneEl, data) => new StereoToneOutput(getAudio(sceneEl), {
     frequencyHz: data.toneFrequencyHz,
     durationMs: data.toneDurationMs,
+    fadeMs: data.fadeMs,
+    gain: data.gain,
+  }),
+  'flexible-tone': (sceneEl, data) => new FlexibleToneOutput(getAudio(sceneEl), {
+    frequencyHz: data.toneFrequencyHz,
+    fullScaleDegPerSec: data.fullScaleDegPerSec,
     fadeMs: data.fadeMs,
     gain: data.gain,
   }),
@@ -46,20 +59,20 @@ type TurnCueInternals = TurnCueSystem & {
   sceneEl: Scene;
   signalListeners: Set<(signal: TurnSignal) => void>;
   cueListeners: Set<(cue: TurnCue) => void>;
-  output: CueOutput | null;
+  output: TurnOutput | null;
   unsubscribeSource: Unsubscribe | null;
   teardown(): void;
 };
 
 /**
- * Turn cues: a turn-rate source feeds a `TurnDetector`, whose cues go to an
- * output. Source and output are chosen by the schema; the `condition` system
- * sets that schema per experimental condition.
+ * Turn cues: a turn-rate source feeds a `TurnDetector`, whose smoothed signal
+ * and cues go to an output. Source and output are chosen by the schema; the
+ * `condition` system sets that schema per experimental condition.
  */
 AFRAME.registerSystem('turn-cues', {
   schema: {
     source: { type: 'string', default: 'optical-flow', oneOf: ['optical-flow', 'none'] },
-    output: { type: 'string', default: 'stereo-tone', oneOf: ['stereo-tone', 'none'] },
+    output: { type: 'string', default: 'stereo-tone', oneOf: ['stereo-tone', 'flexible-tone', 'none'] },
     onThresholdDegPerSec: { type: 'number', default: 5 },
     offThresholdDegPerSec: { type: 'number', default: 2 },
     smoothingMs: { type: 'number', default: 250 },
@@ -67,6 +80,7 @@ AFRAME.registerSystem('turn-cues', {
     toneDurationMs: { type: 'number', default: 1000 },
     fadeMs: { type: 'number', default: 15 },
     gain: { type: 'number', default: 0.3 },
+    fullScaleDegPerSec: { type: 'number', default: 20 },
   },
 
   init(this: TurnCueInternals) {
@@ -101,6 +115,7 @@ AFRAME.registerSystem('turn-cues', {
         return;
       }
 
+      output?.signal(detection.signal);
       this.signalListeners.forEach((listener) => listener(detection.signal));
 
       if (detection.cue) {

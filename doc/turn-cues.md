@@ -2,7 +2,9 @@
 
 Audio countermeasure after a condition from the literature: turning direction
 conveyed by a 1000 ms, 800 Hz sine on the left channel for a left turn and on
-the right channel for a right turn. Here the turn is detected from the **live
+the right channel for a right turn. A continuous variant (Flexible Tone) plays
+the tone all the time, with its loudness on each ear following the turn rate
+in that direction. Here the turn is detected from the **live
 rig-induced optical flow** (see `optical-flow.md`), not from the path or the
 rig kinematics.
 
@@ -25,13 +27,22 @@ system `turn-cues` (`turn-cue-system.ts`):
    smoothed rate exceeds `onThresholdDegPerSec`, and the detector re-arms once
    it falls below `offThresholdDegPerSec`. Cues are at least `toneDurationMs`
    apart.
-3. **Output** (`CueOutput`): presents a cue.
+3. **Output** (`TurnOutput`): receives every smoothed signal and every cue,
+   and presents what it is made for.
    - `stereo-tone` (`stereo-tone-output.ts`): Web Audio sine →
      gain envelope (`fadeMs` ramps, no clicks) → `StereoPannerNode` at ±1 →
      speakers, through the shared `audio` system's context. Head-locked stereo
      on purpose, not A-Frame's `sound` / `PositionalAudio`, which would be
      HRTF-spatialized and world-anchored. Disposing it (on a condition switch)
-     cuts off a tone still playing.
+     cuts off a tone still playing. Ignores the continuous signal.
+   - `flexible-tone` (`flexible-tone-output.ts`): one continuous sine →
+     separate left and right `GainNode`s → `ChannelMergerNode` → speakers.
+     Each smoothed signal sets the channel of the turn direction to
+     `gain · min(1, |rate| / fullScaleDegPerSec)` and the other to 0
+     (`setTargetAtTime` with `fadeMs` as time constant, no zipper noise), so
+     straight flight is silent. Starts with the first signal once audio is
+     running; disposing it fades the tone out. Presents no discrete cues, so
+     they are logged with `presented: false`.
 
 ## Configuration
 
@@ -43,17 +54,18 @@ their defaults:
 | property | default | |
 |---|---|---|
 | `source` | `optical-flow` | `none` disables detection |
-| `output` | `stereo-tone` | `none`: cues are still detected and logged, nothing is played (the "No Mitigation" condition) |
+| `output` | `stereo-tone` | `flexible-tone`: continuous tone (the "Flexible Tone" condition); `none`: cues are still detected and logged, nothing is played (the "No Mitigation" condition) |
 | `onThresholdDegPerSec` / `offThresholdDegPerSec` | 10 / 5 | hysteresis on the smoothed turn rate |
 | `smoothingMs` | 250 | EMA time constant |
-| `toneFrequencyHz` / `toneDurationMs` / `fadeMs` / `gain` | 800 / 1000 / 15 / 0.3 | tone |
+| `toneFrequencyHz` / `toneDurationMs` / `fadeMs` / `gain` | 800 / 1000 / 15 / 0.3 | tone (`toneDurationMs` also the refractory period between cues) |
+| `fullScaleDegPerSec` | 20 | `flexible-tone`: smoothed turn rate at which a channel reaches `gain` |
 
 Flow tracking off entirely is `optical-flow="enabled: false"`; the
 `optical-flow` source then never emits.
 
-A new signal source (e.g. rig acceleration) or cue presentation (e.g. a visual
+A new signal source (e.g. rig acceleration) or presentation (e.g. a visual
 cue) is a key in `SOURCES` or `OUTPUTS` in `turn-cue-system.ts`, with a
-factory for a `TurnSignalSource` or `CueOutput`, plus the schema's `oneOf`.
+factory for a `TurnSignalSource` or `TurnOutput`, plus the schema's `oneOf`.
 A condition then selects it.
 
 ## Audio unlock

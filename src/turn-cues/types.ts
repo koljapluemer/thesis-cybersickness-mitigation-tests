@@ -30,9 +30,15 @@ export type TurnSignalSource = {
   subscribe(listener: (sample: TurnSample) => void): Unsubscribe;
 };
 
-/** How a cue is presented to the user (e.g. a stereo tone). */
-export type CueOutput = {
-  /** Presents the cue; returns whether it was actually presented. */
+/**
+ * How turns are presented to the user: discrete cues (e.g. a stereo tone per
+ * turn), the continuous smoothed signal (e.g. a tone following the turn rate),
+ * or both. An output ignores what it does not present.
+ */
+export type TurnOutput = {
+  /** Called for every accepted sample with the smoothed turn rate. */
+  signal(signal: TurnSignal): void;
+  /** Presents a detected cue; returns whether it was actually presented. */
   present(direction: TurnDirection): boolean;
   dispose(): void;
 };

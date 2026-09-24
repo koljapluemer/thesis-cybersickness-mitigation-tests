@@ -9,6 +9,7 @@ current one but is not meant to be used from VR.
 |---|---|---|
 | `no-mitigation` | No Mitigation | detected and logged, not played |
 | `turn-tones` | Turn Tones | stereo tones (`turn-cues.md`) |
+| `flexible-tone` | Flexible Tone | continuous tone, per-ear loudness following the turn rate (`turn-cues.md`) |
 
 ## Architecture
 

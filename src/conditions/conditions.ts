@@ -31,6 +31,11 @@ export const CONDITIONS = [
     label: 'Turn Tones',
     mitigations: { 'turn-cues': { output: 'stereo-tone' } },
   },
+  {
+    id: 'flexible-tone',
+    label: 'Flexible Tone',
+    mitigations: { 'turn-cues': { output: 'flexible-tone' } },
+  },
 ] as const satisfies readonly Condition[];
 
 export type ConditionId = (typeof CONDITIONS)[number]['id'];

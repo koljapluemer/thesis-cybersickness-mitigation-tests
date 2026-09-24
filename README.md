@@ -20,7 +20,7 @@ head-locked HUD rotation indicators have since been removed.
 | `src/main.ts` | Scene markup and wiring of the flow recorder, its button and the condition select. |
 | `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path. |
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
-| `src/turn-cues/` | Turn cues (`turn-cues` A-Frame system): turn rate from the live rig-induced flow → detector → left/right stereo tone. See `doc/turn-cues.md`. |
+| `src/turn-cues/` | Turn cues (`turn-cues` A-Frame system): turn rate from the live rig-induced flow → detector → left/right stereo tone, or a continuous tone whose per-ear loudness follows the turn rate. See `doc/turn-cues.md`. |
 | `src/conditions/` | Experimental conditions (`condition` A-Frame system): registry of conditions, each configuring every mitigation system, plus the DOM select and the VR controller cycling to switch them. See `doc/conditions.md`. |
 | `src/audio/` | `audio` A-Frame system: the scene's shared, gesture-unlocked `AudioContext`. |
 | `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
@@ -60,7 +60,7 @@ head-locked HUD rotation indicators have since been removed.
   live rig-induced flow and plays an 800 Hz tone on the left or right channel.
   Configured by the selected condition. Details: `doc/turn-cues.md`.
 - **`condition` system** (`condition="…"` on `<a-scene>`) — the experimental
-  condition (No Mitigation, Turn Tones), switchable with the select in the
+  condition (No Mitigation, Turn Tones, Flexible Tone), switchable with the select in the
   bottom-left corner or, in VR, cycled with B on the right controller. Locked
   while recording.
   Details: `doc/conditions.md`.
