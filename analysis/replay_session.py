@@ -5,7 +5,9 @@ landscape, recomputes the flow field independently of the browser, and
 compares it with the field snapshots measured live.
 
 Usage:
-    cd analysis && uv run replay_session.py optical-flow-<date>.json [--out DIR] [--all-frames] [--every N]
+    cd analysis && uv run replay_session.py [optical-flow-<date>.json] [--out DIR] [--all-frames] [--every N]
+
+Without a log argument, the latest `optical-flow-*.json` in the repository's `log/` is used.
 
 Outputs in DIR (default: next to the log, `<log name>-replay/`):
     timeseries.png   live flow measurements over the session
@@ -33,7 +35,9 @@ import numpy as np
 import trimesh
 from PIL import Image, ImageDraw
 
-PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+REPO_DIR = Path(__file__).resolve().parent.parent
+PUBLIC_DIR = REPO_DIR / "public"
+LOG_DIR = REPO_DIR / "log"
 PANEL_SCALE = 4
 # Flow magnitude (deg/s) that maps to full colour saturation in the flow panels.
 FLOW_COLOUR_RANGE_DEG_PER_SEC = 60.0
@@ -245,13 +249,23 @@ def plot_timeseries(log: dict, path: Path) -> None:
     plt.close(figure)
 
 
+def latest_log() -> Path:
+    # File names carry ISO timestamps, so lexical order is chronological.
+    logs = sorted(LOG_DIR.glob("optical-flow-*.json"))
+    if not logs:
+        raise SystemExit(f"no optical-flow-*.json logs in {LOG_DIR}")
+    return logs[-1]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("log", type=Path)
+    parser.add_argument("log", type=Path, nargs="?", help=f"session log (default: latest in {LOG_DIR})")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--all-frames", action="store_true", help="replay every frame, not only those with live field snapshots")
     parser.add_argument("--every", type=int, default=1, help="with --all-frames: replay every N-th frame")
     args = parser.parse_args()
+    args.log = args.log or latest_log()
+    print(f"log: {args.log}")
 
     log = json.loads(args.log.read_text())
     out = args.out or args.log.with_name(args.log.stem + "-replay")
