@@ -1,8 +1,9 @@
 import 'aframe';
-import type { Entity, Scene, System } from 'aframe';
-import type { Camera, Matrix4, Object3D, PerspectiveCamera, WebGLRenderTarget } from 'three';
+import type { Scene, System } from 'aframe';
+import type { Camera, Matrix4, PerspectiveCamera, WebGLRenderTarget } from 'three';
 import { createFlowMaterial, type FlowMaterial } from './flow-material';
 import { combineMeasurements, createViewGeometry, measureFields, viewGeometryMatches, type ViewGeometry } from './flow-stats';
+import { findRig } from '../rig';
 import type { Eye, FlowComponent, FlowFrame, FlowSample, Unsubscribe, ViewFlow, ViewPose } from './types';
 
 const THREE = AFRAME.THREE;
@@ -58,7 +59,6 @@ type OpticalFlowInternals = OpticalFlowSystem & {
     rigPrevEye: Matrix4;
   };
   activeViews(): ActiveView[];
-  rigObject(): Object3D | null;
   measureView(slot: ViewSlot, view: ActiveView, invDeltaSec: number): ViewPose;
   readSample(frame: FlowFrame, slots: ViewSlot[]): Promise<void>;
 };
@@ -121,17 +121,8 @@ AFRAME.registerSystem('optical-flow', {
     return [{ eye: 'mono', camera: this.sceneEl.camera }];
   },
 
-  /**
-   * The rig is whatever the camera entity is mounted on. Head motion is the
-   * camera's pose relative to it; everything else is rig motion.
-   */
-  rigObject(this: OpticalFlowInternals): Object3D | null {
-    const camera = this.sceneEl.camera as Camera & { el?: Entity };
-    return camera?.el?.object3D.parent ?? null;
-  },
-
   tock(this: OpticalFlowInternals, time: number, timeDelta: number) {
-    const rig = this.rigObject();
+    const rig = findRig(this.sceneEl);
 
     if (!this.data.enabled || !rig) {
       return;

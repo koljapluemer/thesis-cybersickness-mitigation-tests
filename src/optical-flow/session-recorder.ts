@@ -47,7 +47,7 @@ export type LoggedEvent =
 
 export type SessionLog = {
   format: 'optical-flow-session';
-  version: 3;
+  version: 4;
   startedAt: string;
   endedAt: string;
   userAgent: string;
@@ -138,7 +138,7 @@ export class FlowSessionRecorder {
     this.framesByNumber.clear();
     this.log = {
       format: 'optical-flow-session',
-      version: 3,
+      version: 4,
       startedAt: new Date().toISOString(),
       endedAt: '',
       userAgent: navigator.userAgent,

@@ -3,29 +3,41 @@
 Audio countermeasure after a condition from the literature: turning direction
 conveyed by a 1000 ms, 800 Hz sine on the left channel for a left turn and on
 the right channel for a right turn. A continuous variant (Flexible Tone) plays
-the tone all the time, with its loudness on each ear following the turn rate
-in that direction. Here the turn is detected from the **live
-rig-induced optical flow** (see `optical-flow.md`), not from the path or the
-rig kinematics.
+the tone all the time, with its loudness on each ear following the turn
+strength in that direction. The turn is detected either from the **live
+rig-induced optical flow** (see `optical-flow.md`) or from the **rig's angular
+acceleration about its local up axis**, never from the path.
 
 ## Pipeline
 
 Code lives in `src/turn-cues/`. Three independent parts, wired by the A-Frame
 system `turn-cues` (`turn-cue-system.ts`):
 
-1. **Source** (`TurnSignalSource`): delivers turn-rate samples in °/s,
-   positive = left (counter-clockwise from above).
+1. **Source** (`TurnSignalSource`): delivers signed turn-strength samples,
+   positive = left (counter-clockwise from above). The unit depends on the
+   source (`TURN_SOURCE_UNITS` in `turn-cue-system.ts`), and so do the
+   thresholds and `fullScale` a condition sets.
    - `optical-flow` (`optical-flow-turn-source.ts`): from the rig-induced
      field's horizontal flow in the left and right half of the view. A yaw
      moves both halves sideways at the same angular rate regardless of depth;
      forward motion moves them apart. The lateral flow the halves share (the
      smaller one if both have the same sign, else 0) is the turn rate. Image
-     moving right = turning left.
+     moving right = turning left. Unit °/s.
+   - `rig-angular-acceleration` (`rig-angular-acceleration-turn-source.ts`):
+     from the `rig-kinematics` system (`src/rig-kinematics/`). In `tock`,
+     after `tour-flight` has moved the rig, it takes the rig's rotation since
+     the previous frame in the rig's own previous frame, and the y component of
+     its rotation vector over the frame time is the yaw rate about the rig's
+     **local** up axis. The rig is pitched 30° down, so a world-up yaw ω shows
+     up as ω·cos 30° here. The difference of two consecutive rates over the
+     spacing of their frame centres is the angular acceleration, in °/s².
+     It leads the turn rate: the onset of a left turn is a left cue, its end
+     (decelerating) a right cue.
 2. **Detector** (`turn-detector.ts`): drops samples measured over more than
    100 ms, then median of 5 (removes one-frame spikes), exponential smoothing
    (`smoothingMs`), and a threshold with hysteresis: a cue fires when the
-   smoothed rate exceeds `onThresholdDegPerSec`, and the detector re-arms once
-   it falls below `offThresholdDegPerSec`. Cues are at least `toneDurationMs`
+   smoothed strength exceeds `onThreshold`, and the detector re-arms once
+   it falls below `offThreshold`. Cues are at least `toneDurationMs`
    apart.
 3. **Output** (`TurnOutput`): receives every smoothed signal and every cue,
    and presents what it is made for.
@@ -38,9 +50,9 @@ system `turn-cues` (`turn-cue-system.ts`):
    - `flexible-tone` (`flexible-tone-output.ts`): one continuous sine →
      separate left and right `GainNode`s → `ChannelMergerNode` → speakers.
      Each smoothed signal sets the channel of the turn direction to
-     `gain · min(1, |rate| / fullScaleDegPerSec)` and the other to 0
+     `gain · min(1, |strength| / fullScale)` and the other to 0
      (`setTargetAtTime` with `fadeMs` as time constant, no zipper noise), so
-     straight flight is silent. Starts with the first signal once audio is
+     zero strength is silent. Starts with the first signal once audio is
      running; disposing it fades the tone out. Presents no discrete cues, so
      they are logged with `presented: false`.
 
@@ -53,19 +65,25 @@ their defaults:
 
 | property | default | |
 |---|---|---|
-| `source` | `optical-flow` | `none` disables detection |
-| `output` | `stereo-tone` | `flexible-tone`: continuous tone (the "Flexible Tone" condition); `none`: cues are still detected and logged, nothing is played (the "No Mitigation" condition) |
-| `onThresholdDegPerSec` / `offThresholdDegPerSec` | 10 / 5 | hysteresis on the smoothed turn rate |
+| `source` | `optical-flow` | `rig-angular-acceleration`: see above; `none` disables detection |
+| `output` | `stereo-tone` | `flexible-tone`: continuous tone; `none`: cues are still detected and logged, nothing is played (the "No Mitigation" condition) |
+| `onThreshold` / `offThreshold` | 5 / 2 | hysteresis on the smoothed turn strength, source unit |
 | `smoothingMs` | 250 | EMA time constant |
 | `toneFrequencyHz` / `toneDurationMs` / `fadeMs` / `gain` | 800 / 1000 / 15 / 0.3 | tone (`toneDurationMs` also the refractory period between cues) |
-| `fullScaleDegPerSec` | 20 | `flexible-tone`: smoothed turn rate at which a channel reaches `gain` |
+| `fullScale` | 20 | `flexible-tone`: smoothed turn strength at which a channel reaches `gain`, source unit |
+
+The defaults fit `optical-flow` (°/s). The rig-acceleration conditions set
+`onThreshold` 10, `offThreshold` 4 and `fullScale` 30 (°/s²): in a recorded
+tour the smoothed acceleration stays below ~10 °/s² 90 % of the time and
+peaks around 40 °/s².
 
 Flow tracking off entirely is `optical-flow="enabled: false"`; the
 `optical-flow` source then never emits.
 
-A new signal source (e.g. rig acceleration) or presentation (e.g. a visual
+A new signal source or presentation (e.g. a visual
 cue) is a key in `SOURCES` or `OUTPUTS` in `turn-cue-system.ts`, with a
-factory for a `TurnSignalSource` or `TurnOutput`, plus the schema's `oneOf`.
+factory for a `TurnSignalSource` (plus its unit in `TURN_SOURCE_UNITS`) or
+`TurnOutput`, plus the schema's `oneOf`.
 A condition then selects it.
 
 ## Audio unlock
@@ -88,9 +106,11 @@ which is the place to tune the thresholds.
 
 ## Limitations
 
-- **Reactive, not anticipatory:** the cue follows the turn by the readback
-  latency (1–3 frames) plus the smoothing (~250 ms).
-- **Head yaw in VR:** with the head turned far to one side, the rig's forward
+- **Reactive, not anticipatory:** the optical-flow cue follows the turn by the
+  readback latency (1–3 frames) plus the smoothing (~250 ms). The rig
+  acceleration has no readback latency and peaks at the turn's onset, but is a
+  second difference of the poses and therefore noisier.
+- **Head yaw in VR** (optical flow only): with the head turned far to one side, the rig's forward
   motion appears as lateral flow in both halves and can be taken for a turn.
 - **Thresholds are untuned** defaults until checked against recorded sessions.
 - **Speaker leakage:** on the Quest's built-in speakers, left/right separation

@@ -28,7 +28,7 @@ export function createOpticalFlowTurnSource(meter: OpticalFlowSystem): TurnSigna
       return meter.onSample((sample) => listener({
         sceneTimeMs: sample.sceneTimeMs,
         deltaMs: sample.deltaMs,
-        turnDegPerSec: sharedLateralTurnDegPerSec(sample.combined.rigInduced),
+        strength: sharedLateralTurnDegPerSec(sample.combined.rigInduced),
       }));
     },
   };

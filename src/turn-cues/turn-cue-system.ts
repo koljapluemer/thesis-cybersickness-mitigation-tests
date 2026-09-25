@@ -4,33 +4,45 @@ import { getAudio } from '../audio/audio-system';
 import { getOpticalFlow } from '../optical-flow/optical-flow-system';
 import type { Unsubscribe } from '../optical-flow/types';
 import { FlexibleToneOutput } from './flexible-tone-output';
+import { getRigKinematics } from '../rig-kinematics/rig-kinematics-system';
 import { createOpticalFlowTurnSource } from './optical-flow-turn-source';
+import { createRigAngularAccelerationTurnSource } from './rig-angular-acceleration-turn-source';
 import { StereoToneOutput } from './stereo-tone-output';
 import { TurnDetector } from './turn-detector';
 import type { TurnCue, TurnOutput, TurnSignal, TurnSignalSource } from './types';
 
 export type TurnCueData = {
-  /** Where the turn rate comes from; `none` disables detection. */
-  source: 'optical-flow' | 'none';
+  /** Where the turn strength comes from; `none` disables detection. */
+  source: TurnSourceId | 'none';
   /**
    * How turns are presented: `stereo-tone` plays a tone per detected cue,
-   * `flexible-tone` a continuous tone following the smoothed turn rate. With
-   * `none` cues are still detected and logged.
+   * `flexible-tone` a continuous tone following the smoothed turn strength.
+   * With `none` cues are still detected and logged.
    */
   output: 'stereo-tone' | 'flexible-tone' | 'none';
-  onThresholdDegPerSec: number;
-  offThresholdDegPerSec: number;
+  /** Thresholds and `fullScale` are in the source's unit (`TURN_SOURCE_UNITS`). */
+  onThreshold: number;
+  offThreshold: number;
   smoothingMs: number;
   toneFrequencyHz: number;
   toneDurationMs: number;
   fadeMs: number;
   gain: number;
-  /** `flexible-tone`: smoothed turn rate at which a channel reaches `gain`. */
-  fullScaleDegPerSec: number;
+  /** `flexible-tone`: smoothed turn strength at which a channel reaches `gain`. */
+  fullScale: number;
 };
 
-const SOURCES: Record<Exclude<TurnCueData['source'], 'none'>, (sceneEl: Scene) => TurnSignalSource> = {
+type TurnSourceId = 'optical-flow' | 'rig-angular-acceleration';
+
+/** Unit of each source's turn strength, and so of the thresholds and `fullScale`. */
+export const TURN_SOURCE_UNITS: Record<TurnSourceId, string> = {
+  'optical-flow': '°/s',
+  'rig-angular-acceleration': '°/s²',
+};
+
+const SOURCES: Record<TurnSourceId, (sceneEl: Scene) => TurnSignalSource> = {
   'optical-flow': (sceneEl) => createOpticalFlowTurnSource(getOpticalFlow(sceneEl)),
+  'rig-angular-acceleration': (sceneEl) => createRigAngularAccelerationTurnSource(getRigKinematics(sceneEl)),
 };
 
 const OUTPUTS: Record<Exclude<TurnCueData['output'], 'none'>, (sceneEl: Scene, data: TurnCueData) => TurnOutput> = {
@@ -42,14 +54,14 @@ const OUTPUTS: Record<Exclude<TurnCueData['output'], 'none'>, (sceneEl: Scene, d
   }),
   'flexible-tone': (sceneEl, data) => new FlexibleToneOutput(getAudio(sceneEl), {
     frequencyHz: data.toneFrequencyHz,
-    fullScaleDegPerSec: data.fullScaleDegPerSec,
+    fullScale: data.fullScale,
     fadeMs: data.fadeMs,
     gain: data.gain,
   }),
 };
 
 export type TurnCueSystem = System<TurnCueData> & {
-  /** Called for every accepted turn-rate sample, with its smoothed value. */
+  /** Called for every accepted turn sample, with its smoothed value. */
   onSignal(listener: (signal: TurnSignal) => void): Unsubscribe;
   /** Called for every detected cue, whether or not the output presented it. */
   onCue(listener: (cue: TurnCue) => void): Unsubscribe;
@@ -65,22 +77,22 @@ type TurnCueInternals = TurnCueSystem & {
 };
 
 /**
- * Turn cues: a turn-rate source feeds a `TurnDetector`, whose smoothed signal
+ * Turn cues: a turn-strength source feeds a `TurnDetector`, whose smoothed signal
  * and cues go to an output. Source and output are chosen by the schema; the
  * `condition` system sets that schema per experimental condition.
  */
 AFRAME.registerSystem('turn-cues', {
   schema: {
-    source: { type: 'string', default: 'optical-flow', oneOf: ['optical-flow', 'none'] },
+    source: { type: 'string', default: 'optical-flow', oneOf: ['optical-flow', 'rig-angular-acceleration', 'none'] },
     output: { type: 'string', default: 'stereo-tone', oneOf: ['stereo-tone', 'flexible-tone', 'none'] },
-    onThresholdDegPerSec: { type: 'number', default: 5 },
-    offThresholdDegPerSec: { type: 'number', default: 2 },
+    onThreshold: { type: 'number', default: 5 },
+    offThreshold: { type: 'number', default: 2 },
     smoothingMs: { type: 'number', default: 250 },
     toneFrequencyHz: { type: 'number', default: 800 },
     toneDurationMs: { type: 'number', default: 1000 },
     fadeMs: { type: 'number', default: 15 },
     gain: { type: 'number', default: 0.3 },
-    fullScaleDegPerSec: { type: 'number', default: 20 },
+    fullScale: { type: 'number', default: 20 },
   },
 
   init(this: TurnCueInternals) {
@@ -100,8 +112,8 @@ AFRAME.registerSystem('turn-cues', {
     }
 
     const detector = new TurnDetector({
-      onThresholdDegPerSec: data.onThresholdDegPerSec,
-      offThresholdDegPerSec: data.offThresholdDegPerSec,
+      onThreshold: data.onThreshold,
+      offThreshold: data.offThreshold,
       smoothingMs: data.smoothingMs,
       refractoryMs: data.toneDurationMs,
     });
@@ -122,7 +134,7 @@ AFRAME.registerSystem('turn-cues', {
         const cue: TurnCue = {
           sceneTimeMs: sample.sceneTimeMs,
           direction: detection.cue,
-          turnDegPerSec: detection.signal.smoothedDegPerSec,
+          strength: detection.signal.smoothed,
           presented: output?.present(detection.cue) ?? false,
         };
         this.cueListeners.forEach((listener) => listener(cue));

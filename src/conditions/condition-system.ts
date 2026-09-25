@@ -37,7 +37,7 @@ type ConditionInternals = ConditionSystem & {
  * nothing about conditions.
  */
 AFRAME.registerSystem('condition', {
-  schema: { type: 'string', default: 'turn-tones', oneOf: CONDITION_IDS },
+  schema: { type: 'string', default: 'turn-tone-optical-flow', oneOf: CONDITION_IDS },
 
   init(this: ConditionInternals) {
     this.locks = 0;

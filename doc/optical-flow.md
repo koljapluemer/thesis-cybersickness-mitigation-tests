@@ -115,7 +115,7 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 3):
+(`SessionLog`, format version 4):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
 - `condition`: the experimental condition id (see `conditions.md`). It is
@@ -125,9 +125,10 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
   Together with the per-frame poses, this is enough to re-render every frame
   offline.
 - `events`: `enter-vr` / `exit-vr`, and `turn-cue` (direction, triggering
-  turn rate, whether it was presented) with times.
-- `turnSignals[]`: every turn-rate sample of the cue detector, raw and
-  smoothed, keyed by `sceneTimeMs`.
+  turn strength, whether it was presented) with times.
+- `turnSignals[]`: every turn-strength sample of the cue detector, raw
+  (`strength`) and `smoothed`, keyed by `sceneTimeMs`, in the unit of the
+  configured source (see `turn-cues.md`).
 - `frames[]`, one per rendered frame:
   - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `pathTimeSec`,
     `xrPresenting`

@@ -1,10 +1,10 @@
 import type { TurnDirection, TurnSample, TurnSignal } from './types';
 
 export type TurnDetectorOptions = {
-  /** Cue when the smoothed turn rate rises above this, in degrees per second. */
-  onThresholdDegPerSec: number;
-  /** Re-arm once the smoothed turn rate falls below this, in degrees per second. */
-  offThresholdDegPerSec: number;
+  /** Cue when the smoothed turn strength rises above this, in the source's unit. */
+  onThreshold: number;
+  /** Re-arm once the smoothed turn strength falls below this, in the source's unit. */
+  offThreshold: number;
   /** Time constant of the exponential smoothing, in milliseconds. */
   smoothingMs: number;
   /** Minimum time between two cues, in milliseconds. */
@@ -28,11 +28,11 @@ function median(values: number[]): number {
 }
 
 /**
- * Turns a noisy turn-rate stream into discrete turn cues: median filter,
+ * Turns a noisy turn-strength stream into discrete turn cues: median filter,
  * exponential smoothing, then a threshold with hysteresis and a refractory
- * period. A cue fires when the smoothed rate exceeds the on-threshold; the
+ * period. A cue fires when the smoothed strength exceeds the on-threshold; the
  * detector re-arms when it drops below the off-threshold (which a change of
- * direction always passes through, the smoothed rate being continuous).
+ * direction always passes through, the smoothed strength being continuous).
  */
 export class TurnDetector {
   private readonly options: TurnDetectorOptions;
@@ -51,7 +51,7 @@ export class TurnDetector {
       return null;
     }
 
-    this.window.push(sample.turnDegPerSec);
+    this.window.push(sample.strength);
 
     if (this.window.length > MEDIAN_WINDOW) {
       this.window.shift();
@@ -60,18 +60,18 @@ export class TurnDetector {
     const alpha = 1 - Math.exp(-sample.deltaMs / this.options.smoothingMs);
     this.smoothed += alpha * (median(this.window) - this.smoothed);
 
-    return { signal: { ...sample, smoothedDegPerSec: this.smoothed }, cue: this.detect(sample.sceneTimeMs) };
+    return { signal: { ...sample, smoothed: this.smoothed }, cue: this.detect(sample.sceneTimeMs) };
   }
 
   private detect(sceneTimeMs: number): TurnDirection | null {
-    const { onThresholdDegPerSec, offThresholdDegPerSec, refractoryMs } = this.options;
+    const { onThreshold, offThreshold, refractoryMs } = this.options;
     const magnitude = Math.abs(this.smoothed);
 
-    if (magnitude < offThresholdDegPerSec) {
+    if (magnitude < offThreshold) {
       this.armed = true;
     }
 
-    if (!this.armed || magnitude < onThresholdDegPerSec || sceneTimeMs - this.lastCueTimeMs < refractoryMs) {
+    if (!this.armed || magnitude < onThreshold || sceneTimeMs - this.lastCueTimeMs < refractoryMs) {
       return null;
     }
 

@@ -26,7 +26,7 @@ app.innerHTML = `
     background="color: #dcecf8"
     vr-mode-ui="enabled: true"
     optical-flow="fieldHeight: 64"
-    condition="turn-tones"
+    condition="turn-tone-optical-flow"
   >
     <a-assets>
       <a-asset-item id="mountain-landscape" src="${LANDSCAPE_SRC}"></a-asset-item>

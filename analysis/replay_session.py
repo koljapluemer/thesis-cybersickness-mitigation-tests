@@ -266,8 +266,12 @@ def plot_timeseries(log: dict, path: Path) -> None:
     plt.close(figure)
 
 
+# Unit of each turn source's strength, as `TURN_SOURCE_UNITS` in `turn-cue-system.ts`.
+TURN_SOURCE_UNITS = {"optical-flow": "deg/s", "rig-angular-acceleration": "deg/s²"}
+
+
 def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
-    """Turn-rate signal of the cue detector (positive = left), thresholds and cues."""
+    """Turn-strength signal of the cue detector (positive = left), thresholds and cues."""
     config = log["turnCues"]
     frames = log["frames"]
     signals = log["turnSignals"]
@@ -278,16 +282,17 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
             [frame["sceneTimeMs"] for frame in frames],
             [frame["timeMs"] / 1000 for frame in frames],
         )
-        axis.plot(t, [signal["turnDegPerSec"] for signal in signals], color="C0", alpha=0.35, label="raw")
-        axis.plot(t, [signal["smoothedDegPerSec"] for signal in signals], color="C0", label="smoothed")
+        axis.plot(t, [signal["strength"] for signal in signals], color="C0", alpha=0.35, label="raw")
+        axis.plot(t, [signal["smoothed"] for signal in signals], color="C0", label="smoothed")
     for sign in (1, -1):
-        axis.axhline(sign * config["onThresholdDegPerSec"], color="C3", linestyle="--", linewidth=0.8)
-        axis.axhline(sign * config["offThresholdDegPerSec"], color="C3", linestyle=":", linewidth=0.8)
+        axis.axhline(sign * config["onThreshold"], color="C3", linestyle="--", linewidth=0.8)
+        axis.axhline(sign * config["offThreshold"], color="C3", linestyle=":", linewidth=0.8)
     for event in log["events"]:
         if event["type"] == "turn-cue":
             colour = "C2" if event["direction"] == "left" else "C1"
             axis.axvline(event["timeMs"] / 1000, color=colour, alpha=0.8 if event["presented"] else 0.3)
-    axis.set_ylabel(f"turn deg/s (+left)\ncondition: {log['condition']} (output: {config['output']})")
+    unit = TURN_SOURCE_UNITS.get(config["source"], "")
+    axis.set_ylabel(f"turn {config['source']} {unit} (+left)\ncondition: {log['condition']} (output: {config['output']})")
     axis.legend(loc="upper right")
 
 

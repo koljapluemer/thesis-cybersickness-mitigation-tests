@@ -8,8 +8,10 @@ current one but is not meant to be used from VR.
 | id | label | turn cues |
 |---|---|---|
 | `no-mitigation` | No Mitigation | detected and logged, not played |
-| `turn-tones` | Turn Tones | stereo tones (`turn-cues.md`) |
-| `flexible-tone` | Flexible Tone | continuous tone, per-ear loudness following the turn rate (`turn-cues.md`) |
+| `turn-tone-optical-flow` | Turn Tone (Optical Flow) | stereo tones, turns from the optical flow (`turn-cues.md`) |
+| `flexible-tone-optical-flow` | Flexible Tone (Optical Flow) | continuous tone, per-ear loudness following the optical-flow turn rate |
+| `turn-tone-rig-acceleration` | Turn Tone (Rig Angular Acceleration) | stereo tones, turns from the rig's angular acceleration about its local up axis |
+| `flexible-tone-rig-acceleration` | Flexible Tone (Rig Angular Acceleration) | continuous tone, per-ear loudness following that angular acceleration |
 
 ## Architecture
 
@@ -22,7 +24,7 @@ Code lives in `src/conditions/`.
   label and `mitigations`, the config of *every* mitigation system
   (`MitigationConfigs`). Properties a condition leaves out take the system's
   schema defaults, never values from the previous condition.
-- **`condition` system** (`condition-system.ts`, `condition="turn-tones"` on
+- **`condition` system** (`condition-system.ts`, `condition="turn-tone-optical-flow"` on
   `<a-scene>`) applies a condition by writing each mitigation's config with
   `sceneEl.setAttribute(system, …)`. A-Frame then runs that system's `update`.
   API through `getCondition(sceneEl)`: `state` (id, label, locked),

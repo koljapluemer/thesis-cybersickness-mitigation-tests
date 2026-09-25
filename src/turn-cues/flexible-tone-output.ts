@@ -3,8 +3,8 @@ import type { TurnOutput, TurnSignal } from './types';
 
 export type FlexibleToneOptions = {
   frequencyHz: number;
-  /** Smoothed turn rate at which a channel reaches `gain`, in degrees per second. */
-  fullScaleDegPerSec: number;
+  /** Smoothed turn strength at which a channel reaches `gain`, in the source's unit. */
+  fullScale: number;
   /** Time constant of the gain changes that avoid clicks, in milliseconds. */
   fadeMs: number;
   /** Peak gain per channel, 0..1. */
@@ -20,8 +20,8 @@ type ToneGraph = {
 
 /**
  * A continuous sine tone whose loudness on each ear follows the smoothed turn
- * rate: a left turn raises the left channel, a right turn the right channel,
- * linearly up to `gain` at `fullScaleDegPerSec`; straight flight is silent.
+ * strength: a left turn raises the left channel, a right turn the right
+ * channel, linearly up to `gain` at `fullScale`; zero strength is silent.
  * Head-locked stereo like `StereoToneOutput`. The tone starts with the first
  * signal once the shared `audio` context is running; discrete cues are not
  * presented.
@@ -44,11 +44,11 @@ export class FlexibleToneOutput implements TurnOutput {
     }
 
     const graph = this.graph ?? this.start(context);
-    const { fullScaleDegPerSec, fadeMs, gain } = this.options;
-    const level = (degPerSec: number) => gain * Math.min(1, Math.max(0, degPerSec) / fullScaleDegPerSec);
+    const { fullScale, fadeMs, gain } = this.options;
+    const level = (strength: number) => gain * Math.min(1, Math.max(0, strength) / fullScale);
 
-    graph.left.gain.setTargetAtTime(level(signal.smoothedDegPerSec), context.currentTime, fadeMs / 1000);
-    graph.right.gain.setTargetAtTime(level(-signal.smoothedDegPerSec), context.currentTime, fadeMs / 1000);
+    graph.left.gain.setTargetAtTime(level(signal.smoothed), context.currentTime, fadeMs / 1000);
+    graph.right.gain.setTargetAtTime(level(-signal.smoothed), context.currentTime, fadeMs / 1000);
   }
 
   present(): boolean {
