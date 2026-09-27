@@ -34,7 +34,15 @@ angular acceleration. So a constant α settles at θ = −α/ωₙ², and a stea
 at θ = 0: the sound shows acceleration, not rate. ωₙ = 2π / `naturalPeriodMs`;
 the default of 8 s gives ≈ 49° lag at a sustained 30 °/s².
 
-- The lag is clamped to `maxLagDeg`.
+The **source** does not sit on the sphere itself: its lag is the sphere's lag
+times `lagGain`, over all three axes. The sphere's physical lag can never
+exceed how far the rig has turned within about one response time, and the
+tour's sharpest turns are only ≈ 50–75° over 2–4 s. So a halfway swing with a
+return of a few seconds needs amplification: `naturalPeriodMs` and
+`dampingRatio` set the timing, `lagGain` the size.
+
+- The source's lag is clamped to `maxLagDeg` (the sphere's to
+  `maxLagDeg / lagGain`).
 - On the first sample, and after a frame longer than 100 ms (tab switch, XR
   session start), the sphere snaps to the rig instead of integrating.
 - The rig is pitched 30° down, so a rotation about world up appears in the rig
@@ -49,7 +57,8 @@ vector as its local yaw rate.
 
 The rest direction is the rig's forward axis (−z) tilted down by
 `elevationDeg` (default −30°, i.e. 60° below the horizon with the rig's own
-pitch). Each frame, the head-frame direction is `q_head⁻¹ · q · d`. `q_head`
+pitch). Each frame, the head-frame direction is
+`q_head⁻¹ · q_rig · exp(lagGain · θ) · d`, with θ the sphere's lag. `q_head`
 comes from `headMatrixWorld` in `src/rig.ts`: the XR camera while presenting,
 otherwise the scene camera. Both are current in `tock`, which A-Frame runs
 after rendering.
@@ -106,22 +115,28 @@ if it should apply to every condition.
 | `enabled` | false | off in every other condition |
 | `naturalPeriodMs` | 8000 | undamped period of the spring |
 | `dampingRatio` | 1 | 1 = critically damped, no wobble of its own |
-| `maxLagDeg` | 150 | lag clamp; also the lag of full rev |
+| `lagGain` | 1 | source lag = sphere lag × this; the size of the swing, > 0 |
+| `maxLagDeg` | 150 | clamp of the source's lag; also the lag of full rev |
 | `elevationDeg` | −30 | rest direction below the rig's forward axis |
 | `revWithLag` | false | motor revs with the lag (see above) |
 | `gain` / `fadeMs` | 0.3 / 50 | output level, fade in/out time constant |
 
-**Untuned:** a turn onset of 15 °/s² over 2 s peaks at only ≈ 11° lag with the
-default period. A longer `naturalPeriodMs` gives larger swings, which return
-more slowly.
+**Untuned:** a turn onset of 15 °/s² over 2 s peaks at only ≈ 13° sphere lag
+with the default period. A longer `naturalPeriodMs` gives larger swings, which
+return more slowly; `lagGain` scales the swing without changing its timing.
+Replaying the rig's yaw of a recorded tour through the model, the sharpest
+turn peaks at ≈ 11° sphere lag with `naturalPeriodMs: 6000, dampingRatio: 1`
+(no overshoot) and ≈ 15° with 8000, so `lagGain` ≈ 16 or ≈ 12 brings it near
+180°.
 
 ## Logging
 
 The session log stores the effective configuration (`inertialSound`,
 including `revWithLag`) and one `inertialSoundSamples[]` entry per frame:
-`lagRotationVectorDeg` (rig frame, x pitch / y yaw / z roll, y > 0 = sound
-turned left), `sourceDirectionRig` (unit vector, rig frame: the source's
-place on the sphere), `sourceDirectionHead` (unit vector, head frame) and
+`lagRotationVectorDeg` (the source's lag, i.e. sphere lag × `lagGain`; rig
+frame, x pitch / y yaw / z roll, y > 0 = sound turned left),
+`sourceDirectionRig` (unit vector, rig frame: the rest direction turned by
+that lag), `sourceDirectionHead` (unit vector, head frame) and
 `lagFraction`. `analysis/replay_session.py` plots the lag components and the
 source's head-frame azimuth in the last panel of `timeseries.png`.
 `analysis/sound_sphere.py` animates the source as a point with a trail on the

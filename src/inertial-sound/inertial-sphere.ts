@@ -44,15 +44,10 @@ export class InertialSphere {
     this.maxLagRad = THREE.MathUtils.degToRad(options.maxLagDeg);
   }
 
-  /** World orientation of the sphere; equals the rig's at rest. */
-  get orientation(): Readonly<Quaternion> {
-    return this.q;
-  }
-
   /**
    * Rotation of the sphere relative to the rig, as a rotation vector in rig
-   * coordinates, in radians. Its y component > 0: the sphere, and the sound on
-   * it, is turned left of its rest position.
+   * coordinates, in radians. Its y component > 0: the sphere is turned left of
+   * its rest position.
    */
   get lag(): Readonly<Vector3> {
     return this.lagVector;

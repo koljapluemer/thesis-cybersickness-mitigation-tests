@@ -20,7 +20,13 @@ export type InertialSoundData = {
   naturalPeriodMs: number;
   /** 1 = critically damped. */
   dampingRatio: number;
-  /** The lag is clamped to this angle, in degrees; also the lag at which the motor revs fully. */
+  /**
+   * The source's lag is the sphere's lag times this, over all axes: sets the
+   * size of the swing while `naturalPeriodMs` and `dampingRatio` set its timing.
+   * Must be > 0.
+   */
+  lagGain: number;
+  /** The source's lag is clamped to this angle, in degrees; also the lag at which the motor revs fully. */
   maxLagDeg: number;
   /** Rest direction of the source below the rig's forward axis (itself pitched down by `tour-flight`), in degrees. */
   elevationDeg: number;
@@ -39,11 +45,12 @@ export type InertialSoundSample = {
   /** Frame interval the sphere was stepped over, in milliseconds. */
   deltaMs: number;
   /**
-   * Rotation of the sphere relative to the rig, as a rotation vector in rig
-   * coordinates, in degrees (x pitch, y yaw, z roll; y > 0 = sound turned left).
+   * Rotation of the source from its rest direction, relative to the rig: the
+   * sphere's lag times `lagGain`, as a rotation vector in rig coordinates, in
+   * degrees (x pitch, y yaw, z roll; y > 0 = sound turned left).
    */
   lagRotationVectorDeg: [number, number, number];
-  /** Unit vector to the source in rig coordinates (x right, y up, −z forward): its place on the sphere. */
+  /** Unit vector to the source in rig coordinates (x right, y up, −z forward): the rest direction turned by the lag. */
   sourceDirectionRig: [number, number, number];
   /** Unit vector to the source in head coordinates (x right, y up, −z forward). */
   sourceDirectionHead: [number, number, number];
@@ -63,6 +70,7 @@ type InertialSoundInternals = InertialSoundSystem & {
   unsubscribeKinematics: Unsubscribe | null;
   scratch: {
     rest: Vector3;
+    sourceLag: Vector3;
     direction: Vector3;
     directionRig: Vector3;
     lagQuaternion: Quaternion;
@@ -77,8 +85,8 @@ type InertialSoundInternals = InertialSoundSystem & {
 };
 
 /**
- * Inertial motor sound: a motor sound on a sphere around the rig that lags
- * behind the rig's rotation (`InertialSphere`), world-anchored and
+ * Inertial motor sound: a motor sound that lags behind the rig's rotation by
+ * `lagGain` times the lag of an `InertialSphere`, world-anchored and
  * HRTF-spatialized. Driven by `rig-kinematics`; configured per experimental
  * condition through the schema.
  */
@@ -87,6 +95,7 @@ AFRAME.registerSystem('inertial-sound', {
     enabled: { type: 'boolean', default: false },
     naturalPeriodMs: { type: 'number', default: 8000 },
     dampingRatio: { type: 'number', default: 1 },
+    lagGain: { type: 'number', default: 1 },
     maxLagDeg: { type: 'number', default: 150 },
     elevationDeg: { type: 'number', default: -30 },
     revWithLag: { type: 'boolean', default: false },
@@ -100,6 +109,7 @@ AFRAME.registerSystem('inertial-sound', {
     this.unsubscribeKinematics = null;
     this.scratch = {
       rest: new THREE.Vector3(),
+      sourceLag: new THREE.Vector3(),
       direction: new THREE.Vector3(),
       directionRig: new THREE.Vector3(),
       lagQuaternion: new THREE.Quaternion(),
@@ -123,7 +133,8 @@ AFRAME.registerSystem('inertial-sound', {
     const elevation = THREE.MathUtils.degToRad(data.elevationDeg);
     this.scratch.rest.set(0, Math.sin(elevation), -Math.cos(elevation));
 
-    const sphere = new InertialSphere(data);
+    // Clamping the sphere at maxLagDeg / lagGain clamps the source at maxLagDeg.
+    const sphere = new InertialSphere({ ...data, maxLagDeg: data.maxLagDeg / data.lagGain });
     const sound = new MotorSound(getAudio(this.sceneEl), { gain: data.gain, fadeMs: data.fadeMs, revWithLag: data.revWithLag });
     let aligned = false;
 
@@ -135,7 +146,7 @@ AFRAME.registerSystem('inertial-sound', {
   },
 
   step(this: InertialSoundInternals, sphere: InertialSphere, sound: MotorSound, sample: RigKinematicsSample, aligned: boolean) {
-    const { rest, direction, directionRig, lagQuaternion, rigQuaternion, rigAngularVelocity, headPosition, headQuaternion, headScale } = this.scratch;
+    const { rest, sourceLag, direction, directionRig, lagQuaternion, rigQuaternion, rigAngularVelocity, headPosition, headQuaternion, headScale } = this.scratch;
     rigQuaternion.fromArray(sample.rigQuaternion);
     rigAngularVelocity.fromArray(sample.angularVelocityRadPerSec);
 
@@ -145,19 +156,20 @@ AFRAME.registerSystem('inertial-sound', {
       sphere.reset(rigQuaternion, rigAngularVelocity);
     }
 
-    headMatrixWorld(this.sceneEl).decompose(headPosition, headQuaternion, headScale);
-    direction.copy(rest).applyQuaternion(sphere.orientation).applyQuaternion(headQuaternion.invert());
+    sourceLag.copy(sphere.lag).multiplyScalar(this.data.lagGain);
+    directionRig.copy(rest).applyQuaternion(fromRotationVector(sourceLag, lagQuaternion));
 
-    const lag = sphere.lag;
-    directionRig.copy(rest).applyQuaternion(fromRotationVector(lag, lagQuaternion));
-    const lagFraction = Math.min(1, lag.length() / THREE.MathUtils.degToRad(this.data.maxLagDeg));
+    headMatrixWorld(this.sceneEl).decompose(headPosition, headQuaternion, headScale);
+    direction.copy(directionRig).applyQuaternion(rigQuaternion).applyQuaternion(headQuaternion.invert());
+
+    const lagFraction = Math.min(1, sourceLag.length() / THREE.MathUtils.degToRad(this.data.maxLagDeg));
     sound.update(direction, lagFraction);
 
     const toDeg = THREE.MathUtils.radToDeg;
     const logged: InertialSoundSample = {
       sceneTimeMs: sample.sceneTimeMs,
       deltaMs: sample.frameDeltaMs,
-      lagRotationVectorDeg: [toDeg(lag.x), toDeg(lag.y), toDeg(lag.z)],
+      lagRotationVectorDeg: [toDeg(sourceLag.x), toDeg(sourceLag.y), toDeg(sourceLag.z)],
       sourceDirectionRig: [directionRig.x, directionRig.y, directionRig.z],
       sourceDirectionHead: [direction.x, direction.y, direction.z],
       lagFraction,

@@ -293,12 +293,12 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
 
 
 def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
-    """Lag of the inertial sound's sphere (rig frame, +left) and the head-frame azimuth of its source."""
+    """Lag of the inertial sound's source (sphere lag × lagGain, rig frame, +left) and its head-frame azimuth."""
     config = log["inertialSound"]
     frames = log["frames"]
     samples = log["inertialSoundSamples"]
     rev = "revving" if config["revWithLag"] else "constant timbre"
-    axis.set_ylabel(f"inertial sound (deg)\nT={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, {rev}")
+    axis.set_ylabel(f"inertial sound (deg)\nT={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, ×{config['lagGain']:g}, {rev}")
     if not samples or not frames:
         axis.text(0.5, 0.5, "inertial sound disabled", transform=axis.transAxes, ha="center", va="center")
         return

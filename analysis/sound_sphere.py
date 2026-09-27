@@ -1,8 +1,8 @@
 """Animation of the inertial sound's source on its sphere.
 
 Draws the source as a point with a fading trail on a unit sphere, twice side by
-side: in the rig frame (its place on the inertial sphere; at rest it sits at
-the rest direction) and in the head frame (where the ears hear it). A timeline
+side: in the rig frame (the rest direction turned by the source's lag, the
+sphere's lag times `lagGain`) and in the head frame (where the ears hear it). A timeline
 of the lag below follows the playhead. See `../doc/inertial-sound.md`.
 
 Usage:
@@ -139,7 +139,7 @@ def main() -> None:
     timeline = figure.add_subplot(grid[1, :])
     figure.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=0.08, wspace=0, hspace=0.15)
 
-    draw_sphere(rig_axis, "rig frame: place on the inertial sphere")
+    draw_sphere(rig_axis, "rig frame: source relative to the rig")
     draw_sphere(head_axis, "head frame: as heard")
     rest = to_plot(rest_direction(config["elevationDeg"]))
     rig_axis.plot(*rest[:, None], "x", color="black", markersize=8)
@@ -156,7 +156,7 @@ def main() -> None:
     trail_span = timeline.axvspan(start, start, color=SOURCE_COLOUR, alpha=0.15)
 
     rev = "revving" if config["revWithLag"] else "constant timbre"
-    title = f"{log['condition']}   T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, {rev}"
+    title = f"{log['condition']}   T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, ×{config['lagGain']:g}, {rev}"
     caption = figure.suptitle("")
 
     out = args.out or args.log.with_name(args.log.stem + "-replay")

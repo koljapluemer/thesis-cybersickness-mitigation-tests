@@ -73,7 +73,7 @@ export const CONDITIONS = [
   {
     id: 'inertial-motor-sound-constant',
     label: 'Inertial Motor Sound (Constant Pitch)',
-    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: false, naturalPeriodMs: 12000, dampingRatio:.8 } },
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: false, lagGain: 7 } },
   },
   {
     id: 'inertial-motor-sound-revving',

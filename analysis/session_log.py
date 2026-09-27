@@ -9,7 +9,7 @@ import numpy as np
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO_DIR / "log"
-LOG_VERSION = 6
+LOG_VERSION = 7
 
 
 def mat4(values: list[float]) -> np.ndarray:
