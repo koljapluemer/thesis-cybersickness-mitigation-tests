@@ -17,6 +17,7 @@ import numpy as np
 
 from agreement import Pair, compare, plot_pair, plot_summary, resample
 from kinematics import plot_kinematics, pose_kinematics
+from session_log import teleport_frames
 
 PAIRS = [
     Pair(
@@ -94,7 +95,7 @@ def json_ready(result: dict) -> dict:
 
 def analyse(log: dict, out: Path) -> dict:
     frames = log["frames"]
-    kinematics = pose_kinematics(frames)
+    kinematics = pose_kinematics(frames, teleport_frames(log))
     plot_kinematics(log, kinematics, out / "kinematics.png")
 
     columns = kinematics | flow_measures(frames) | {"absHeadYaw": np.abs(kinematics["headYaw"])}

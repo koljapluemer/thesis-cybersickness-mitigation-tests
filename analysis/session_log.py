@@ -9,7 +9,7 @@ import numpy as np
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO_DIR / "log"
-LOG_VERSION = 7
+LOG_VERSION = 8
 
 
 def mat4(values: list[float]) -> np.ndarray:
@@ -36,3 +36,9 @@ def session_time_sec(log: dict, scene_times_ms: list[float]) -> np.ndarray:
     """Scene times (as keyed by samples and signals) -> session time in seconds, via the frames."""
     frames = log["frames"]
     return np.interp(scene_times_ms, [frame["sceneTimeMs"] for frame in frames], [frame["timeMs"] / 1000 for frame in frames])
+
+
+def teleport_frames(log: dict) -> set[int]:
+    """Numbers of the frames the rig jumped into (`rig-teleport` events): no rate may span them."""
+    times = {event["sceneTimeMs"] for event in log["events"] if event["type"] == "rig-teleport"}
+    return {frame["frame"] for frame in log["frames"] if frame["sceneTimeMs"] in times}

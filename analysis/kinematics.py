@@ -1,7 +1,7 @@
 """Rig and head kinematics from the logged poses.
 
-The rig is the camera's parent (the `tour-flight` entity), the head is the
-camera relative to the rig. Rates are taken between consecutive frames over the
+The rig is the camera's parent (the entity the scene moves: the `tour-flight`
+entity or the car's seat), the head is the camera relative to the rig. Rates are taken between consecutive frames over the
 frame's `deltaMs`, the same discretisation as the optical flow, so both are
 directly comparable. Signs: yaw positive = left (counter-clockwise seen from
 above, same as the image moving right), pitch positive = up.
@@ -47,8 +47,8 @@ def wrap_deg(angle: float) -> float:
     return (angle + 180) % 360 - 180
 
 
-def pose_kinematics(frames: list[dict]) -> dict[str, np.ndarray]:
-    """Per-frame kinematic measures, NaN where a rate has no directly preceding frame."""
+def pose_kinematics(frames: list[dict], teleports: set[int]) -> dict[str, np.ndarray]:
+    """Per-frame kinematic measures, NaN where a rate has no directly preceding frame or spans a teleport."""
     n = len(frames)
     out = {name: np.full(n, np.nan) for name in MEASURES}
     rig = [mat4(frame["rigMatrixWorld"]) for frame in frames]
@@ -58,7 +58,7 @@ def pose_kinematics(frames: list[dict]) -> dict[str, np.ndarray]:
 
     for i, frame in enumerate(frames):
         out["headYaw"][i], out["headPitch"][i] = heading_and_pitch(head[i])
-        if i == 0 or frames[i - 1]["frame"] != frame["frame"] - 1:
+        if i == 0 or frames[i - 1]["frame"] != frame["frame"] - 1 or frame["frame"] in teleports:
             continue
         dt = frame["deltaMs"] / 1000
         rig_yaw, rig_pitch = heading_and_pitch(rig[i][:3, :3])

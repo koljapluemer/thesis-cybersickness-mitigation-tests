@@ -1,7 +1,8 @@
 """Offline replay of an optical flow session log.
 
 Re-renders every replayed frame from the logged poses by ray casting the
-landscape, recomputes the flow field independently of the browser, and
+scene's models (static ones in the world, rig-fixed ones moving with the rig),
+recomputes the flow field independently of the browser, and
 compares it with the field snapshots measured live. Both flow components are
 validated: total (rig + head motion) and rig-induced (rig motion alone).
 
@@ -59,36 +60,102 @@ def decode_fields(entry: dict) -> dict[str, np.ndarray]:
 
 
 @dataclass
-class Landscape:
+class Model:
+    """Merged triangles of glTF files, with what the orientation colouring needs per face."""
+
     mesh: trimesh.Trimesh
-    uv: np.ndarray
-    texture: np.ndarray
+    uv: np.ndarray  # per vertex; zeros where untextured
+    face_texture: np.ndarray  # per face index into `textures`, -1 = untextured
+    face_colour: np.ndarray  # per face base colour factor, RGB 0..1
+    textures: list[np.ndarray]
 
 
-def load_landscape(log: dict) -> Landscape:
-    source = PUBLIC_DIR / log["scene"]["landscape"]["src"].lstrip("/")
-    scene = trimesh.load(source)
-    vertices, faces, uvs = [], [], []
-    texture = None
+@dataclass
+class SceneGeometry:
+    static: Model | None  # world coordinates
+    rig_fixed: Model | None  # rig coordinates
+
+
+def load_model(entries: list[tuple[str, np.ndarray]]) -> Model | None:
+    """(glTF path under public/, matrix of its root) pairs -> one merged model, None without entries."""
+    vertices, faces, uvs, face_texture, face_colour, textures = [], [], [], [], [], []
     offset = 0
 
-    for node in scene.graph.nodes_geometry:
-        transform, geometry_name = scene.graph[node]
-        geometry = scene.geometry[geometry_name]
-        vertices.append(trimesh.transform_points(geometry.vertices, transform))
-        faces.append(geometry.faces + offset)
-        uvs.append(geometry.visual.uv)
-        offset += len(geometry.vertices)
-        if texture is None:
-            texture = np.asarray(geometry.visual.material.baseColorTexture.convert("RGB"), dtype=np.float32) / 255
+    for src, root in entries:
+        scene = trimesh.load(PUBLIC_DIR / src.lstrip("/"), force="scene")
+        for node in scene.graph.nodes_geometry:
+            transform, geometry_name = scene.graph[node]
+            geometry = scene.geometry[geometry_name]
+            material = geometry.visual.material
+            texture = getattr(material, "baseColorTexture", None)
+            factor = getattr(material, "baseColorFactor", None)
+            colour = np.ones(3) if factor is None else np.asarray(factor[:3], dtype=np.float64) / 255
+            uv = getattr(geometry.visual, "uv", None)
+            texture_index = -1
+            if texture is not None and uv is not None:
+                textures.append(np.asarray(texture.convert("RGB"), dtype=np.float32) / 255)
+                texture_index = len(textures) - 1
+            vertices.append(trimesh.transform_points(geometry.vertices, root @ transform))
+            faces.append(geometry.faces + offset)
+            uvs.append(uv if texture_index >= 0 else np.zeros((len(geometry.vertices), 2)))
+            face_texture.append(np.full(len(geometry.faces), texture_index))
+            face_colour.append(np.tile(colour, (len(geometry.faces), 1)))
+            offset += len(geometry.vertices)
 
-    world = mat4(log["scene"]["landscape"]["matrixWorld"])
-    mesh = trimesh.Trimesh(
-        vertices=trimesh.transform_points(np.concatenate(vertices), world),
-        faces=np.concatenate(faces),
-        process=False,
+    if not vertices:
+        return None
+    return Model(
+        mesh=trimesh.Trimesh(vertices=np.concatenate(vertices), faces=np.concatenate(faces), process=False),
+        uv=np.concatenate(uvs),
+        face_texture=np.concatenate(face_texture),
+        face_colour=np.concatenate(face_colour),
+        textures=textures,
     )
-    return Landscape(mesh=mesh, uv=np.concatenate(uvs), texture=texture)
+
+
+def load_scene(log: dict) -> SceneGeometry:
+    scene = log["scene"]
+    return SceneGeometry(
+        static=load_model([(model["src"], mat4(model["matrixWorld"])) for model in scene["staticModels"]]),
+        rig_fixed=load_model([(model["src"], mat4(model["matrixRig"])) for model in scene["rigFixedModels"]]),
+    )
+
+
+def cast(model: Model | None, origins: np.ndarray, directions: np.ndarray, count: int):
+    """Nearest hit per ray: (hit location [n, 3] or NaN, triangle index [n] or -1), in the model's coordinates."""
+    locations = np.full((count, 3), np.nan)
+    triangles = np.full(count, -1)
+    if model is not None:
+        hits, ray_index, triangle_index = model.mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+        locations[ray_index] = hits
+        triangles[ray_index] = triangle_index
+    return locations, triangles
+
+
+def surface_colour(model: Model, locations: np.ndarray, triangles: np.ndarray) -> np.ndarray:
+    """Base colour at the hits: factor times texel where textured."""
+    colour = model.face_colour[triangles].astype(np.float32)
+    textured = model.face_texture[triangles] >= 0
+    if textured.any():
+        faces = model.mesh.faces[triangles[textured]]
+        barycentric = trimesh.triangles.points_to_barycentric(model.mesh.vertices[faces], locations[textured])
+        uv = np.einsum("ij,ijk->ik", barycentric, model.uv[faces])
+        texel = np.empty((len(uv), 3), dtype=np.float32)
+        texture_ids = model.face_texture[triangles[textured]]
+        for texture_id in np.unique(texture_ids):
+            texture = model.textures[texture_id]
+            tex_h, tex_w, _ = texture.shape
+            selected = texture_ids == texture_id
+            texel[selected] = texture[
+                np.clip(((1 - uv[selected, 1]) % 1) * tex_h, 0, tex_h - 1).astype(int),
+                np.clip((uv[selected, 0] % 1) * tex_w, 0, tex_w - 1).astype(int),
+            ]
+        colour[textured] *= texel
+    return colour
+
+
+def scene_state_label(state: dict) -> str:
+    return "  ".join(f"{name}={value:.2f}" for name, value in state.items())
 
 
 def pixel_directions(width: int, height: int, projection: np.ndarray) -> np.ndarray:
@@ -117,7 +184,7 @@ def to_eye(view: np.ndarray, points: np.ndarray) -> np.ndarray:
     return points @ view[:3, :3].T + view[:3, 3]
 
 
-def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: int, width: int, height: int):
+def replay_view(scene: SceneGeometry, frame: dict, previous: dict, view_index: int, width: int, height: int):
     """Returns ({component: flow field [h, w, 4] in the live layout}, colour image [h, w, 3])."""
     view = frame["views"][view_index]
     eye_world = mat4(view["matrixWorld"])
@@ -125,20 +192,35 @@ def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: i
     prev_eye_world = mat4(previous["views"][view_index]["matrixWorld"])
     rig = mat4(frame["rigMatrixWorld"])
     prev_rig = mat4(previous["rigMatrixWorld"])
-    rig_prev_eye_world = prev_rig @ np.linalg.inv(rig) @ eye_world
+    rig_motion = prev_rig @ np.linalg.inv(rig)  # current -> previous pose of anything fixed to the rig
+    rig_prev_eye_world = rig_motion @ eye_world
 
+    count = width * height
     directions = pixel_directions(width, height, projection) @ eye_world[:3, :3].T
-    origins = np.repeat(eye_world[:3, 3][None], len(directions), axis=0)
-    locations, ray_index, triangle_index = landscape.mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+    origins = np.repeat(eye_world[:3, 3][None], count, axis=0)
+    static_hits, static_triangles = cast(scene.static, origins, directions, count)
+    inverse_rig = np.linalg.inv(rig)
+    rig_hits, rig_triangles = cast(scene.rig_fixed, to_eye(inverse_rig, origins), directions @ inverse_rig[:3, :3].T, count)
+    rig_hits_world = to_eye(rig, rig_hits)
 
-    fields = {component: np.tile(np.array([0, 0, -1, 0], dtype=np.float32), (width * height, 1)) for component in COMPONENTS}
-    colour = np.tile(np.array([0.86, 0.93, 0.97], dtype=np.float32), (width * height, 1))
+    # Nearest of both; NaN distances (no hit) never win.
+    static_distance = np.where(static_triangles >= 0, np.linalg.norm(static_hits - origins, axis=1), np.inf)
+    rig_distance = np.where(rig_triangles >= 0, np.linalg.norm(rig_hits_world - origins, axis=1), np.inf)
+    on_rig = rig_distance < static_distance
+    on_static = ~on_rig & np.isfinite(static_distance)
+    ray_index = np.flatnonzero(on_rig | on_static)
+    locations = np.where(on_rig[:, None], rig_hits_world, static_hits)[ray_index]
+    # Where each surface point was in the previous frame: static points stay, rig-fixed ones moved with the rig.
+    previous_locations = np.where(on_rig[ray_index, None], to_eye(rig_motion, locations), locations)
+
+    fields = {component: np.tile(np.array([0, 0, -1, 0], dtype=np.float32), (count, 1)) for component in COMPONENTS}
+    colour = np.tile(np.array([0.86, 0.93, 0.97], dtype=np.float32), (count, 1))
 
     if len(locations):
         inv_dt = 1000.0 / frame["deltaMs"]
         current = to_eye(np.linalg.inv(eye_world), locations)
-        prev = to_eye(np.linalg.inv(prev_eye_world), locations)
-        rig_prev = to_eye(np.linalg.inv(rig_prev_eye_world), locations)
+        prev = to_eye(np.linalg.inv(prev_eye_world), previous_locations)
+        rig_prev = to_eye(np.linalg.inv(rig_prev_eye_world), previous_locations)
 
         def ndc(eye_points: np.ndarray) -> np.ndarray:
             clip = np.c_[eye_points, np.ones(len(eye_points))] @ projection.T
@@ -153,20 +235,18 @@ def replay_view(landscape: Landscape, frame: dict, previous: dict, view_index: i
             field[ray_index, 2] = angle_deg(unit(previous_points), unit(current)) * inv_dt
             field[ray_index, 3] = azimuth_change_deg(previous_points, current) * inv_dt
 
-        # Texture lookup with simple Lambert shading, only for orientation.
-        faces = landscape.mesh.faces[triangle_index]
-        barycentric = trimesh.triangles.points_to_barycentric(landscape.mesh.vertices[faces], locations)
-        uv = np.einsum("ij,ijk->ik", barycentric, landscape.uv[faces])
-        tex_h, tex_w, _ = landscape.texture.shape
-        texel = landscape.texture[
-            np.clip(((1 - uv[:, 1]) % 1) * tex_h, 0, tex_h - 1).astype(int),
-            np.clip((uv[:, 0] % 1) * tex_w, 0, tex_w - 1).astype(int),
-        ]
-        normals = landscape.mesh.face_normals[triangle_index]
+        # Base colour with simple Lambert shading, only for orientation.
         light = np.array([6, 10, 3], dtype=np.float64)
         light /= np.linalg.norm(light)
-        shade = 0.55 + 0.45 * np.abs(normals @ light)
-        colour[ray_index] = texel * shade[:, None]
+        for model, hits, triangles, mask, to_world in (
+            (scene.static, static_hits, static_triangles, on_static, np.eye(3)),
+            (scene.rig_fixed, rig_hits, rig_triangles, on_rig, rig[:3, :3]),
+        ):
+            if not mask.any():
+                continue
+            normals = model.mesh.face_normals[triangles[mask]] @ to_world.T
+            shade = 0.55 + 0.45 * np.abs(normals @ light)
+            colour[mask] = surface_colour(model, hits[mask], triangles[mask]) * shade[:, None]
 
     return {component: field.reshape(height, width, 4) for component, field in fields.items()}, colour.reshape(height, width, 3)
 
@@ -328,9 +408,9 @@ def main() -> None:
 
     measured = [frame for frame in log["frames"] if frame["flow"] is not None]
     duration = log["frames"][-1]["timeMs"] / 1000 if log["frames"] else 0
-    xr_events = [event for event in log["events"] if event["type"] != "turn-cue"]
-    cues = len(log["events"]) - len(xr_events)
-    print(f"{len(log['frames'])} frames over {duration:.1f}s, {len(measured)} measured, {cues} turn cues, XR events: {xr_events}")
+    other_events = [event for event in log["events"] if event["type"] != "turn-cue"]
+    cues = len(log["events"]) - len(other_events)
+    print(f"scene {log['scene']['id']}: {len(log['frames'])} frames over {duration:.1f}s, {len(measured)} measured, {cues} turn cues, other events: {other_events}")
 
     plot_timeseries(log, out / "timeseries.png")
     for name, pair in analyse_pose_flow(log, out)["pairs"].items():
@@ -341,7 +421,7 @@ def main() -> None:
         if pair["sameUnits"]:
             line += f", CCC {statistics['concordanceCcc']['value']:.3f}, bias {statistics['bias']['value']:.2f} °/s"
         print(line)
-    landscape = load_landscape(log)
+    scene = load_scene(log)
 
     replay = []
     for index, frame in enumerate(log["frames"]):
@@ -357,12 +437,12 @@ def main() -> None:
         live_fields = {entry["eye"]: decode_fields(entry) for entry in frame.get("fields", [])}
         for view_index, view in enumerate(frame["views"]):
             width, height = view["fieldWidth"], view["fieldHeight"]
-            replayed, colour = replay_view(landscape, frame, previous, view_index, width, height)
+            replayed, colour = replay_view(scene, frame, previous, view_index, width, height)
             live = live_fields.get(view["eye"])
             blank = Image.new("RGB", (width * PANEL_SCALE, height * PANEL_SCALE), (40, 40, 40))
             panels = [upscale(colour), blank, flow_image(replayed["total"]), blank]
             caption = (
-                f"frame {frame['frame']}  t={frame['timeMs'] / 1000:.2f}s  path={frame['pathTimeSec']:.2f}s  "
+                f"frame {frame['frame']}  t={frame['timeMs'] / 1000:.2f}s  {scene_state_label(frame['sceneState'])}  "
                 f"eye={view['eye']}  live mean={frame['flow']['views'][view_index]['total']['meanDegPerSec']:.1f}°/s"
             )
             if live is not None:
