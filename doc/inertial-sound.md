@@ -80,9 +80,26 @@ Switching condition fades the sound out and releases its nodes.
 
 ## Configuration
 
-Set by the experimental condition (`conditions.md`); only
-`inertial-motor-sound-constant` and `inertial-motor-sound-revving` enable it,
-differing only in `revWithLag`.
+**Where to set it:** in `src/conditions/conditions.ts`, in the
+`'inertial-sound'` object of each condition's `mitigations`, e.g.
+
+```ts
+{
+  id: 'inertial-motor-sound-revving',
+  label: 'Inertial Motor Sound (Revving Pitch)',
+  mitigations: {
+    'turn-cues': { output: 'none' },
+    // Add e.g. `naturalPeriodMs: 12000` here to override the default for this condition.
+    'inertial-sound': { enabled: true, revWithLag: true },
+  },
+},
+```
+
+Only `inertial-motor-sound-constant` and `inertial-motor-sound-revving` enable
+it; they differ only in `revWithLag`. A property a condition leaves out takes
+the default below, which lives in the `schema` of the `inertial-sound` system
+in `src/inertial-sound/inertial-sound-system.ts`. Change a default there only
+if it should apply to every condition.
 
 | property | default | |
 |---|---|---|
