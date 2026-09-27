@@ -1,9 +1,13 @@
 # Experimental conditions
 
-A condition is one combination of cybersickness mitigations. On desktop,
-conditions are switched with the select in the bottom-left corner. In VR, the
-B button on the right controller cycles through them; the select shows the
-current one but is not meant to be used from VR.
+A condition is one combination of cybersickness mitigations. Conditions are
+independent of the test scene (`scenes.md`). On desktop, conditions are
+switched with the lower select in the bottom-left corner (the upper one picks
+the scene). In VR, the B button on the right controller cycles through them;
+the select shows the current one but is not meant to be used from VR.
+
+The current condition is mirrored in the URL's `condition` parameter, and a
+link with it starts in that condition (see `scenes.md`).
 
 | id | label | turn cues | inertial sound |
 |---|---|---|---|
@@ -26,20 +30,22 @@ Code lives in `src/conditions/`.
   label and `mitigations`, the config of *every* mitigation system
   (`MitigationConfigs`). Properties a condition leaves out take the system's
   schema defaults, never values from the previous condition.
-- **`condition` system** (`condition-system.ts`, `condition="turn-tone-optical-flow"` on
-  `<a-scene>`) applies a condition by writing each mitigation's config with
+- **`condition` system** (`condition-system.ts`, `condition="…"` on
+  `<a-scene>`, initially the URL's condition) applies a condition by writing each mitigation's config with
   `sceneEl.setAttribute(system, …)`. A-Frame then runs that system's `update`.
   API through `getCondition(sceneEl)`: `state` (id, label, locked),
   `select(id)`, `cycle()`, `lock()`, `onChange(listener)`.
 - **`condition-select.ts`** mounts the DOM `<select>`: one option per
   condition, kept in sync through `onChange`, disabled while locked.
+  `main.ts` also writes every change to the URL.
 - **`condition-cycle` component** (`condition-cycle.ts`) calls `cycle()` on an
-  entity event. In `main.ts` it sits on a model-less
-  `meta-touch-controls="hand: right"` entity with `event: bbuttondown`.
+  entity event. The shared rig (`src/scenes/rig-markup.ts`) puts it on a
+  model-less `meta-touch-controls="hand: right"` entity with
+  `event: bbuttondown`.
 
 ## Recording
 
-The recorder locks the condition for the whole recording: the select is
+The recorder locks the condition for the whole recording: both selects are
 disabled, and the B button does nothing. The log stores `condition`
 (the id) and the effective `turnCues` and `inertialSound` configurations.
 

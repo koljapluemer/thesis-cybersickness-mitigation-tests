@@ -17,13 +17,15 @@ Code in `analysis/`:
 
 ## Kinematic measures
 
-The rig is the camera's parent (the `tour-flight` entity). The head is the camera
+The rig is the camera's parent (the `tour-flight` entity in Mountain Flight, the
+seat inside the car in Car Race, see `scenes.md`). The head is the camera
 relative to the rig: `rig⁻¹ · camera`. Both eyes share the head's orientation, so
 the first view stands for the head.
 
 Rates are taken between consecutive frames over the frame's `deltaMs`. This is
 the same discretisation as the optical flow, so both describe exactly the same
-interval. A frame with no directly preceding frame gets NaN.
+interval. A frame with no directly preceding frame, or one the rig teleported
+into (`rig-teleport` event, e.g. a car reset), gets NaN.
 
 Signs: yaw positive = **left** (counter-clockwise seen from above), pitch
 positive = **up**. A leftward turn moves the image rightward, which is positive
@@ -40,9 +42,9 @@ in the flow's horizontal channel. Matching pairs therefore have the same sign.
 | `headYawRate` | change of `headYaw`, °/s |
 | `headAngularSpeed` | angle of the head-in-rig rotation between frames, °/s |
 
-The rig is pitched down by `tour-flight`'s `pitch` (30°), so the rig's forward
-axis points 30° below the direction of travel. That offset is constant and does
-not affect the heading.
+In Mountain Flight the rig is pitched down by `tour-flight`'s `pitch` (30°), so
+the rig's forward axis points 30° below the direction of travel. That offset is
+constant and does not affect the heading. The car's rig is level.
 
 ## Compared pairs
 

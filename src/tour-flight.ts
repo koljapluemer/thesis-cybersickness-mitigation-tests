@@ -1,5 +1,6 @@
 import 'aframe';
-import type { Component } from 'aframe';
+import type { Component, Scene } from 'aframe';
+import { announceRigTeleport } from './rig';
 
 const THREE = AFRAME.THREE;
 
@@ -34,6 +35,8 @@ export type TourFlightComponent = Component<TourFlightData> & {
   rotationEuler: InstanceType<typeof AFRAME.THREE.Euler>;
   /** Current position on the path in seconds. */
   pathTimeSec: number;
+  /** Whether the rig has been put on the path yet. */
+  placed: boolean;
 };
 
 type Point = [number, number, number];
@@ -163,6 +166,7 @@ AFRAME.registerComponent('tour-flight', {
   init(this: TourFlightComponent) {
     this.path = null;
     this.pathTimeSec = 0;
+    this.placed = false;
     this.offsetVector = new THREE.Vector3();
     this.worldPosition = new THREE.Vector3();
     this.lookTarget = new THREE.Vector3();
@@ -195,5 +199,10 @@ AFRAME.registerComponent('tour-flight', {
     this.el.object3D.lookAt(this.lookTarget);
     this.el.object3D.rotateY(Math.PI);
     this.el.object3D.rotateX(-THREE.MathUtils.degToRad(this.data.pitch));
+
+    if (!this.placed) {
+      this.placed = true;
+      announceRigTeleport(this.el.sceneEl as Scene);
+    }
   },
 });

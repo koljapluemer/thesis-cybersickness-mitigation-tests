@@ -150,7 +150,7 @@ AFRAME.registerSystem('inertial-sound', {
     rigQuaternion.fromArray(sample.rigQuaternion);
     rigAngularVelocity.fromArray(sample.angularVelocityRadPerSec);
 
-    if (aligned && sample.frameDeltaMs <= MAX_STEP_MS) {
+    if (aligned && !sample.restarted && sample.frameDeltaMs <= MAX_STEP_MS) {
       sphere.step(rigQuaternion, rigAngularVelocity, sample.frameDeltaMs / 1000);
     } else {
       sphere.reset(rigQuaternion, rigAngularVelocity);

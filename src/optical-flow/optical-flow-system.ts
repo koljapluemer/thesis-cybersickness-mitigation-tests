@@ -3,13 +3,16 @@ import type { Scene, System } from 'aframe';
 import type { Camera, Matrix4, PerspectiveCamera, WebGLRenderTarget } from 'three';
 import { createFlowMaterial, type FlowMaterial } from './flow-material';
 import { combineMeasurements, createViewGeometry, measureFields, viewGeometryMatches, type ViewGeometry } from './flow-stats';
-import { findRig } from '../rig';
+import { findRig, RigTeleportFlag } from '../rig';
+import { RIG_FIXED_LAYER } from '../rig-fixed';
 import type { Eye, FlowComponent, FlowFrame, FlowSample, Unsubscribe, ViewFlow, ViewPose } from './types';
 
 const THREE = AFRAME.THREE;
 
 /** Clear value for pixels without geometry, see `FlowField`. */
 const BACKGROUND = new Float32Array([0, 0, -1, 0]);
+
+const RIG_FIXED_MASK = 1 << RIG_FIXED_LAYER;
 
 /** Color attachment of each flow component in the flow render target. */
 const ATTACHMENTS: Record<FlowComponent, number> = { total: 0, rigInduced: 1 };
@@ -49,6 +52,7 @@ type OpticalFlowInternals = OpticalFlowSystem & {
   slots: ViewSlot[];
   layoutKey: string;
   prevRigMatrixWorld: Matrix4;
+  teleports: RigTeleportFlag;
   frame: number;
   frameListeners: Set<(frame: FlowFrame) => void>;
   sampleListeners: Set<(sample: FlowSample) => void>;
@@ -57,6 +61,8 @@ type OpticalFlowInternals = OpticalFlowSystem & {
     rig: Matrix4;
     inverseEye: Matrix4;
     rigPrevEye: Matrix4;
+    toPrevEye: Matrix4;
+    toRigPrevEye: Matrix4;
   };
   activeViews(): ActiveView[];
   measureView(slot: ViewSlot, view: ActiveView, invDeltaSec: number): ViewPose;
@@ -78,6 +84,7 @@ AFRAME.registerSystem('optical-flow', {
     this.slots = [];
     this.layoutKey = '';
     this.prevRigMatrixWorld = new THREE.Matrix4();
+    this.teleports = new RigTeleportFlag(this.sceneEl);
     this.frame = 0;
     this.frameListeners = new Set();
     this.sampleListeners = new Set();
@@ -86,6 +93,8 @@ AFRAME.registerSystem('optical-flow', {
       rig: new THREE.Matrix4(),
       inverseEye: new THREE.Matrix4(),
       rigPrevEye: new THREE.Matrix4(),
+      toPrevEye: new THREE.Matrix4(),
+      toRigPrevEye: new THREE.Matrix4(),
     };
   },
 
@@ -123,6 +132,7 @@ AFRAME.registerSystem('optical-flow', {
 
   tock(this: OpticalFlowInternals, time: number, timeDelta: number) {
     const rig = findRig(this.sceneEl);
+    const teleported = this.teleports.consume();
 
     if (!this.data.enabled || !rig) {
       return;
@@ -150,7 +160,8 @@ AFRAME.registerSystem('optical-flow', {
       }));
     }
 
-    const measurable = !layoutChanged && timeDelta > 0;
+    // Flow across a rig teleport would be the jump, not motion.
+    const measurable = !layoutChanged && timeDelta > 0 && !teleported;
     const frame: FlowFrame = {
       frame: this.frame,
       sceneTimeMs: time,
@@ -210,7 +221,7 @@ AFRAME.registerSystem('optical-flow', {
     const height = this.data.fieldHeight;
     const width = Math.max(1, Math.round(height * (projection.elements[5] / projection.elements[0])));
     const eyeMatrixWorld = camera.matrixWorld;
-    const { inverseEye, rigPrevEye } = this.scratch;
+    const { inverseEye, rigPrevEye, toPrevEye, toRigPrevEye } = this.scratch;
 
     if (slot.target.width !== width || slot.target.height !== height) {
       slot.target.setSize(width, height);
@@ -220,14 +231,13 @@ AFRAME.registerSystem('optical-flow', {
       slot.geometry = createViewGeometry(width, height, projection);
     }
 
-    // current eye space -> previous eye space: prevView * currentEyeWorld
-    inverseEye.copy(slot.prevMatrixWorld).invert();
-    this.material.uniforms.uToPrevEye.value.multiplyMatrices(inverseEye, eyeMatrixWorld);
-
     // Previous eye pose had only the rig moved: prevRig * inverse(rig) * currentEyeWorld
     rigPrevEye.copy(this.scratch.rig).invert().premultiply(this.prevRigMatrixWorld).multiply(eyeMatrixWorld);
-    inverseEye.copy(rigPrevEye).invert();
-    this.material.uniforms.uToRigPrevEye.value.multiplyMatrices(inverseEye, eyeMatrixWorld);
+    // current eye space -> previous eye space: prevView * currentEyeWorld
+    inverseEye.copy(slot.prevMatrixWorld).invert();
+    toPrevEye.multiplyMatrices(inverseEye, eyeMatrixWorld);
+    // current eye space -> eye space of the rig-only previous pose
+    toRigPrevEye.copy(rigPrevEye).invert().multiply(eyeMatrixWorld);
     this.material.uniforms.uInvDeltaSec.value = invDeltaSec;
 
     const { flowCamera } = this;
@@ -235,14 +245,28 @@ AFRAME.registerSystem('optical-flow', {
     flowCamera.matrixWorldInverse.copy(eyeMatrixWorld).invert();
     flowCamera.projectionMatrix.copy(projection);
     flowCamera.projectionMatrixInverse.copy(projection).invert();
-    flowCamera.layers.mask = camera.layers.mask;
 
     renderer.setRenderTarget(slot.target);
     renderer.state.buffers.color.setMask(true);
     const gl = renderer.getContext() as WebGL2RenderingContext;
     Object.values(ATTACHMENTS).forEach((attachment) => gl.clearBufferfv(gl.COLOR, attachment, BACKGROUND));
     renderer.clear(false, true, false);
+
+    // World-static geometry.
+    this.material.uniforms.uToPrevEye.value.copy(toPrevEye);
+    this.material.uniforms.uToRigPrevEye.value.copy(toRigPrevEye);
+    flowCamera.layers.mask = camera.layers.mask & ~RIG_FIXED_MASK;
     renderer.render(this.sceneEl.object3D, flowCamera);
+
+    // Rig-fixed geometry, depth-tested against the world: a point P was at
+    // prevRig * inverse(rig) * P, i.e. seen from the previous eye through
+    // inverse(prevEyeWorld) * rigPrevEye, and it has no rig-induced flow.
+    if (camera.layers.mask & RIG_FIXED_MASK) {
+      this.material.uniforms.uToPrevEye.value.multiplyMatrices(inverseEye, rigPrevEye);
+      this.material.uniforms.uToRigPrevEye.value.identity();
+      flowCamera.layers.mask = RIG_FIXED_MASK;
+      renderer.render(this.sceneEl.object3D, flowCamera);
+    }
 
     return {
       eye: view.eye,

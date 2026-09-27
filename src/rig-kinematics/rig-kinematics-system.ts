@@ -2,7 +2,7 @@ import 'aframe';
 import type { Scene, System } from 'aframe';
 import type { Quaternion, Vector3 } from 'three';
 import type { Unsubscribe } from '../optical-flow/types';
-import { findRig } from '../rig';
+import { findRig, RigTeleportFlag } from '../rig';
 import { rotationVector } from '../rotation';
 
 const THREE = AFRAME.THREE;
@@ -22,6 +22,11 @@ export type RigKinematicsSample = {
   rigQuaternion: [number, number, number, number];
   /** Angular velocity of the rig over the last frame, world frame, in radians per second. */
   angularVelocityRadPerSec: [number, number, number];
+  /**
+   * True for the first sample after the history restarted (start, paused
+   * frame, rig teleport): state carried over from earlier samples is stale.
+   */
+  restarted: boolean;
 };
 
 export type RigKinematicsSystem = System & {
@@ -34,6 +39,8 @@ type RigKinematicsInternals = RigKinematicsSystem & {
   listeners: Set<(sample: RigKinematicsSample) => void>;
   prevQuaternion: Quaternion | null;
   prevYawRate: { degPerSec: number; deltaMs: number } | null;
+  restarted: boolean;
+  teleports: RigTeleportFlag;
   scratch: { position: Vector3; quaternion: Quaternion; scale: Vector3; relative: Quaternion; rotation: Vector3 };
 };
 
@@ -51,6 +58,8 @@ AFRAME.registerSystem('rig-kinematics', {
     this.listeners = new Set();
     this.prevQuaternion = null;
     this.prevYawRate = null;
+    this.restarted = true;
+    this.teleports = new RigTeleportFlag(this.sceneEl);
     this.scratch = {
       position: new THREE.Vector3(),
       quaternion: new THREE.Quaternion(),
@@ -67,10 +76,15 @@ AFRAME.registerSystem('rig-kinematics', {
 
   tock(this: RigKinematicsInternals, time: number, timeDelta: number) {
     const rig = findRig(this.sceneEl);
+    const teleported = this.teleports.consume();
 
-    if (!rig || timeDelta <= 0) {
+    if (!rig || timeDelta <= 0 || teleported) {
       this.prevQuaternion = null;
       this.prevYawRate = null;
+      this.restarted = true;
+    }
+
+    if (!rig || timeDelta <= 0) {
       return;
     }
 
@@ -107,7 +121,9 @@ AFRAME.registerSystem('rig-kinematics', {
       localYawAccelerationDegPerSec2: (yawRate.degPerSec - prev.degPerSec) / (deltaMs / 1000),
       rigQuaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
       angularVelocityRadPerSec: [rotation.x, rotation.y, rotation.z],
+      restarted: this.restarted,
     };
+    this.restarted = false;
     this.listeners.forEach((listener) => listener(sample));
   },
 });

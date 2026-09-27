@@ -1,21 +1,16 @@
+import type { Scene } from 'aframe';
 import type { ConditionSystem } from '../conditions/condition-system';
 import type { ConditionId } from '../conditions/conditions';
 import type { InertialSoundData, InertialSoundSample, InertialSoundSystem } from '../inertial-sound/inertial-sound-system';
 import type { TurnCueData, TurnCueSystem } from '../turn-cues/turn-cue-system';
+import { RIG_TELEPORT_EVENT } from '../rig';
+import type { SceneDescription, SceneRecording } from '../scenes/scene-definition';
+import type { SceneFrameState } from '../scenes/scenes';
 import type { TurnCue, TurnSignal } from '../turn-cues/types';
 import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
 import type { OpticalFlowSystem } from './optical-flow-system';
 import type { Eye, FlowComponent, FlowField, FlowFrame, FlowMeasurement, FlowSample, Unsubscribe, ViewPose } from './types';
 
-/** Static description of the scene, needed to reproduce the rendered views offline. */
-export type SceneDescription = {
-  landscape: {
-    src: string;
-    /** World matrix of the glTF root, column-major. */
-    matrixWorld: number[];
-  };
-  tour: Record<string, unknown>;
-};
 
 export type LoggedFields = {
   eye: Eye;
@@ -29,12 +24,12 @@ export type LoggedFrame = {
   timeMs: number;
   sceneTimeMs: number;
   deltaMs: number;
-  /** Position on the tour path in seconds. */
-  pathTimeSec: number;
+  /** Scene-specific state, see the scene's `frameState`. */
+  sceneState: SceneFrameState;
   xrPresenting: boolean;
   rigMatrixWorld: number[];
   views: ViewPose[];
-  /** Null for frames that could not be measured (first frame, view layout change). */
+  /** Null for frames that could not be measured (first frame, view layout change, rig teleport). */
   flow: {
     combined: FlowMeasurement;
     views: (FlowMeasurement & { eye: Eye })[];
@@ -44,11 +39,13 @@ export type LoggedFrame = {
 
 export type LoggedEvent =
   | { timeMs: number; type: 'enter-vr' | 'exit-vr' }
+  /** The rig jumped (start, reset) before the frame at `sceneTimeMs`; its flow is not measured. */
+  | { timeMs: number; type: 'rig-teleport'; sceneTimeMs: number }
   | ({ timeMs: number; type: 'turn-cue' } & TurnCue);
 
 export type SessionLog = {
   format: 'optical-flow-session';
-  version: 7;
+  version: 8;
   startedAt: string;
   endedAt: string;
   userAgent: string;
@@ -74,8 +71,7 @@ export type SessionLog = {
 };
 
 export type RecorderOptions = {
-  describeScene: () => SceneDescription;
-  pathTimeSec: () => number;
+  scene: SceneRecording<SceneFrameState>;
   /** How often full flow fields are embedded in the log. */
   fieldSnapshotIntervalMs: number;
 };
@@ -146,7 +142,7 @@ export class FlowSessionRecorder {
     this.framesByNumber.clear();
     this.log = {
       format: 'optical-flow-session',
-      version: 7,
+      version: 8,
       startedAt: new Date().toISOString(),
       endedAt: '',
       userAgent: navigator.userAgent,
@@ -159,7 +155,7 @@ export class FlowSessionRecorder {
       condition: this.conditions.state.id,
       turnCues: { ...this.turnCues.data },
       inertialSound: { ...this.inertialSound.data },
-      scene: this.options.describeScene(),
+      scene: this.options.scene.describe(),
       events: [],
       frames: [],
       turnSignals: [],
@@ -168,6 +164,8 @@ export class FlowSessionRecorder {
 
     const onXrEvent = (event: Event) => this.log?.events.push({ timeMs: this.elapsedMs(), type: event.type as 'enter-vr' | 'exit-vr' });
     XR_EVENTS.forEach((type) => this.sceneEl.addEventListener(type, onXrEvent));
+    const onTeleport = () => this.log?.events.push({ timeMs: this.elapsedMs(), type: 'rig-teleport', sceneTimeMs: (this.sceneEl as Scene).time });
+    this.sceneEl.addEventListener(RIG_TELEPORT_EVENT, onTeleport);
 
     this.unsubscribers = [
       this.meter.onFrame((frame) => this.recordFrame(frame)),
@@ -177,6 +175,7 @@ export class FlowSessionRecorder {
       this.inertialSound.onSample((sample) => this.log?.inertialSoundSamples.push(sample)),
       this.turnCues.onCue((cue) => this.log?.events.push({ timeMs: this.elapsedMs(), type: 'turn-cue', ...cue })),
       () => XR_EVENTS.forEach((type) => this.sceneEl.removeEventListener(type, onXrEvent)),
+      () => this.sceneEl.removeEventListener(RIG_TELEPORT_EVENT, onTeleport),
     ];
   }
 
@@ -209,7 +208,7 @@ export class FlowSessionRecorder {
       timeMs: this.elapsedMs(),
       sceneTimeMs: frame.sceneTimeMs,
       deltaMs: frame.deltaMs,
-      pathTimeSec: this.options.pathTimeSec(),
+      sceneState: this.options.scene.frameState(),
       xrPresenting: frame.xrPresenting,
       rigMatrixWorld: frame.rigMatrixWorld,
       views: frame.views,

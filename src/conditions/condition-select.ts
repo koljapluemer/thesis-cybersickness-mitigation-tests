@@ -12,7 +12,11 @@ export function mountConditionSelect(container: HTMLElement, conditions: Conditi
   select.append(...CONDITIONS.map(({ id, label }) => new Option(label, id)));
   container.append(select);
 
-  select.addEventListener('change', () => conditions.select(select.value as ConditionId));
+  select.addEventListener('change', () => {
+    conditions.select(select.value as ConditionId);
+    // Keys belong to the scene (driving), not to the focused select.
+    select.blur();
+  });
 
   const render = () => {
     select.value = conditions.state.id;

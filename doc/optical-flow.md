@@ -12,8 +12,10 @@ the frame time, is that pixel's angular velocity in °/s. This is the flow on th
 display, assuming the eye is fixed in the head. There is no eye-tracking API in
 WebXR, so the rotation of the eye itself (smooth pursuit) is not accounted for.
 
-The scene is static, so all flow comes from camera motion. The flow is computed
-exactly from geometry (depth and the two camera poses), not estimated from pixels.
+The world is static, so its flow comes from camera motion alone. Geometry
+that moves with the rig (`rig-fixed`, e.g. the car body in Car Race) is
+handled separately, see below. The flow is computed exactly from geometry
+(depth and the two camera poses), not estimated from pixels.
 
 **Two components, each a complete field of its own:**
 
@@ -27,7 +29,13 @@ exactly from geometry (depth and the two camera poses), not estimated from pixel
   is no head motion, so `rigInduced == total`.
 
 The rig is whatever the camera entity is mounted on
-(`camera.el.object3D.parent`), which here is the `tour-flight` entity.
+(`camera.el.object3D.parent`): the `tour-flight` entity in Mountain Flight,
+the seat inside the car in Car Race (see `scenes.md`).
+
+**Rig-fixed geometry** moves with the rig, so a point P on it was at
+`prevRig · rig⁻¹ · P` in the previous frame. Its total flow is the head's
+motion relative to the rig only, and its rig-induced flow is zero: from the
+rig-only previous eye pose it looks exactly as it does now.
 
 **Background:** Pixels without geometry are the uniform background colour. Nothing
 visible moves there, so they count as 0 °/s in means. They are reported
@@ -46,7 +54,12 @@ Code lives in `src/optical-flow/`.
      two color attachments (0 = total, 1 = rigInduced; height `fieldHeight`,
      default 64; width follows the view's aspect). It uses
      `scene.overrideMaterial` = the flow material and temporarily disables XR,
-     background and auto-clear, then restores them.
+     background and auto-clear, then restores them. Two passes share the
+     depth buffer: the world (every layer the camera sees except
+     `RIG_FIXED_LAYER`), then the rig-fixed layer with the transforms for
+     rig-fixed geometry (current→previous eye `prevEye⁻¹ · prevRig · rig⁻¹ ·
+     eye`, rig-only transform identity). Without rig-fixed geometry the second
+     pass renders nothing.
    - Queues an async GPU→CPU readback of both attachments
      (`readRenderTargetPixelsAsync`: pixel buffer object + fence, no stall).
    - Emits `onFrame` synchronously with the poses used.
@@ -69,8 +82,9 @@ Code lives in `src/optical-flow/`.
    - The combined measurement is the mean over views (both eyes).
 
 A frame is not measured (`flow: null` in the log) when the view layout changes
-(entering or leaving VR) or on the very first frame, because there is no
-previous pose.
+(entering or leaving VR), on the very first frame, because there is no
+previous pose, and when the rig teleported (`scenes.md`), because the flow
+would be the jump.
 
 ### Flow field layout
 
@@ -106,7 +120,7 @@ await flow.flush();                  // wait for in-flight readbacks
 Types are in `src/optical-flow/types.ts`. Configure it on the scene:
 `optical-flow="enabled: true; fieldHeight: 64"`.
 
-Cost: one extra render of the landscape per view at 64×~64 px per frame (two
+Cost: one extra render of the scene per view at 64×~64 px per frame (two
 color attachments), plus two 64 KB readbacks per view. This should be negligible on a Quest, but it has not
 been profiled on a device yet.
 
@@ -115,7 +129,7 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 7):
+(`SessionLog`, format version 8):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
 - `condition`: the experimental condition id (see `conditions.md`). It is
@@ -123,10 +137,12 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
 - `turnCues`: the effective `turn-cues` configuration under that condition.
 - `inertialSound`: the effective `inertial-sound` configuration under that
   condition.
-- `scene`: landscape glTF path and world matrix, `tour-flight` settings.
-  Together with the per-frame poses, this is enough to re-render every frame
-  offline.
-- `events`: `enter-vr` / `exit-vr`, and `turn-cue` (direction, triggering
+- `scene`: the scene `id`, `staticModels` (glTF path and world matrix),
+  `rigFixedModels` (glTF path and matrix relative to the rig), and `motion`
+  (the component moving the rig and its settings). Together with the
+  per-frame poses, this is enough to re-render every frame offline.
+- `events`: `enter-vr` / `exit-vr`, `rig-teleport` (with the `sceneTimeMs`
+  of the frame the rig jumped into), and `turn-cue` (direction, triggering
   turn strength, whether it was presented) with times.
 - `turnSignals[]`: every turn-strength sample of the cue detector, raw
   (`strength`) and `smoothed`, keyed by `sceneTimeMs`, in the unit of the
@@ -135,8 +151,9 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
   enabled, else empty: `lagRotationVectorDeg` (the source's lag, rig frame), `sourceDirectionRig`,
   `sourceDirectionHead` and `lagFraction`, keyed by `sceneTimeMs` (see `inertial-sound.md`).
 - `frames[]`, one per rendered frame:
-  - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `pathTimeSec`,
-    `xrPresenting`
+  - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `xrPresenting`
+  - `sceneState`: scene-specific state (`pathTimeSec` in Mountain Flight; speed,
+    yaw rate, steering angle and input in Car Race, see `scenes.md`)
   - `rigMatrixWorld`, `views[]` (eye, camera `matrixWorld`, `projectionMatrix`,
     field size); all matrices column-major, as in three.js
   - `flow`: combined and per-view `FlowMeasurement`, or `null` if not measured
@@ -159,13 +176,15 @@ uv run replay_session.py ~/Downloads/optical-flow-….json            # snapshot
 uv run replay_session.py ~/Downloads/optical-flow-….json --all-frames --every 5
 ```
 
-It loads the landscape glTF with trimesh, applies the logged world matrix, and
-ray casts every flow pixel (Embree) from the logged eye poses. From that it
-recomputes both flow fields independently of the browser and writes:
+It loads the scene's glTF models with trimesh (static ones with their world
+matrix, rig-fixed ones in rig coordinates) and ray casts every flow pixel
+(Embree) from the logged eye poses; rig-fixed models are hit in rig space and
+the nearest hit wins. From that it recomputes both flow fields independently
+of the browser, rig-fixed hits as described above, and writes:
 
 - `timeseries.png`: live total vs. rig-induced mean, eccentricity bands,
-  coverage, frame time, XR events, and the turn signal with thresholds and
-  cues.
+  coverage, frame time, XR and teleport events, and the turn signal with
+  thresholds and cues.
 - `frames/*.png` and `replay.mp4`, four panels per view:
   - a textured reconstruction of what the user saw
   - live flow (hue = direction, brightness = speed, arrows = screen motion over
@@ -194,6 +213,10 @@ A first desktop recording (log format 1) (headless Chrome, 107 frames) gave:
   or not it has texture or contrast. Weighting by local image contrast would be
   a possible next step.
 - **No eye tracking:** retinal flow under smooth pursuit is not modelled.
+- **Rig-fixed geometry is only validated synthetically:** the replay's
+  handling of the car body was checked on constructed frames (car pixels
+  carry only the head's own motion), not yet against a live car-race
+  recording.
 - **Seam of the flight loop:** the exported path is not exactly closed; the
   closing segment from the last keyframe back to the first has a small (~5°)
   kink, which shows up as a brief bump in flow once per lap.

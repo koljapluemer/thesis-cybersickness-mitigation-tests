@@ -25,11 +25,12 @@ system `turn-cues` (`turn-cue-system.ts`):
      moving right = turning left. Unit °/s.
    - `rig-angular-acceleration` (`rig-angular-acceleration-turn-source.ts`):
      from the `rig-kinematics` system (`src/rig-kinematics/`). In `tock`,
-     after `tour-flight` has moved the rig, it takes the rig's rotation since
+     after the scene has moved the rig, it takes the rig's rotation since
      the previous frame in the rig's own previous frame, and the y component of
      its rotation vector over the frame time is the yaw rate about the rig's
-     **local** up axis. The rig is pitched 30° down, so a world-up yaw ω shows
-     up as ω·cos 30° here. The difference of two consecutive rates over the
+     **local** up axis. In Mountain Flight the rig is pitched 30° down, so a
+     world-up yaw ω shows up as ω·cos 30° here; the car's rig is level.
+     After a rig teleport (`scenes.md`) the rates restart. The difference of two consecutive rates over the
      spacing of their frame centres is the angular acceleration, in °/s².
      It leads the turn rate: the onset of a left turn is a left cue, its end
      (decelerating) a right cue.

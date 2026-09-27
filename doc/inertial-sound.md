@@ -43,9 +43,10 @@ return of a few seconds needs amplification: `naturalPeriodMs` and
 
 - The source's lag is clamped to `maxLagDeg` (the sphere's to
   `maxLagDeg / lagGain`).
-- On the first sample, and after a frame longer than 100 ms (tab switch, XR
-  session start), the sphere snaps to the rig instead of integrating.
-- The rig is pitched 30° down, so a rotation about world up appears in the rig
+- On the first sample, after a frame longer than 100 ms (tab switch, XR
+  session start), and after a rig teleport (`restarted` samples, see
+  `scenes.md`), the sphere snaps to the rig instead of integrating.
+- In Mountain Flight the rig is pitched 30° down, so a rotation about world up appears in the rig
   frame split into a yaw (y, cos 30°) and a roll (z, sin 30°) component. Pitch
   changes of the flight path show up as x.
 
@@ -56,8 +57,8 @@ vector as its local yaw rate.
 ## Source direction
 
 The rest direction is the rig's forward axis (−z) tilted down by
-`elevationDeg` (default −30°, i.e. 60° below the horizon with the rig's own
-pitch). Each frame, the head-frame direction is
+`elevationDeg` (default −30°, i.e. 60° below the horizon with the tour
+rig's own pitch, 30° below it in the level car). Each frame, the head-frame direction is
 `q_head⁻¹ · q_rig · exp(lagGain · θ) · d`, with θ the sphere's lag. `q_head`
 comes from `headMatrixWorld` in `src/rig.ts`: the XR camera while presenting,
 otherwise the scene camera. Both are current in `tock`, which A-Frame runs
