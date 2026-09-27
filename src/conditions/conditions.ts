@@ -80,6 +80,15 @@ export const CONDITIONS = [
     label: 'Inertial Motor Sound (Revving Pitch)',
     mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: true } },
   },
+  {
+    id: 'inertial-motor-sound-linear',
+    label: 'Inertial Motor Sound (Linear Acceleration)',
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      // Straight below the listener (rig frame), shifted by the rig's linear acceleration only. Untuned.
+      'inertial-sound': { enabled: true, motion: 'translation', elevationDeg: -90, naturalPeriodMs: 2000 },
+    },
+  },
 ] as const satisfies readonly Condition[];
 
 export type ConditionId = (typeof CONDITIONS)[number]['id'];

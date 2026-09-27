@@ -10,6 +10,10 @@ const REV_SMOOTHING_SEC = 0.1;
 /** Time constant of the source position changes, in seconds. */
 const POSITION_SMOOTHING_SEC = 0.02;
 const PINK_NOISE_SEC = 4;
+/** Distance at which the motor plays at `gain`, in metres: the source's rest distance. */
+export const REFERENCE_DISTANCE_M = 1;
+/** Closer than this, the level stops rising, in metres. */
+const MIN_DISTANCE_M = 0.1;
 
 export type MotorSoundOptions = {
   /** Output gain, 0..1. */
@@ -18,7 +22,7 @@ export type MotorSoundOptions = {
   fadeMs: number;
   /**
    * Whether the motor "revs" with the lag. `true`: firing rate, body pitch and
-   * noise band rise with `lagFraction` (lag / `maxLagDeg`), from the idle values
+   * noise band rise with `lagFraction` (deflection over its clamp), from the idle values
    * below at rest to the rev values at the maximum lag, so the size of the
    * deviation is audible even where HRTF localization is weak (front/back,
    * elevation). `false`: constant idle timbre; only the source position carries
@@ -33,6 +37,7 @@ type MotorGraph = {
   body: OscillatorNode;
   noiseBand: BiquadFilterNode;
   panner: PannerNode;
+  distance: GainNode;
   master: GainNode;
 };
 
@@ -64,9 +69,11 @@ function pinkNoiseBuffer(context: BaseAudioContext): AudioBuffer {
  * at twice the firing rate (the body). Both go through one HRTF `PannerNode`.
  *
  * The listener keeps Web Audio's default pose (origin, looking along −z, up
- * +y, as a three.js camera); `update` places the source at 1 m in the given
- * head-frame direction, without distance attenuation. Starts with the first
- * update once the shared `audio` context is running.
+ * +y, as a three.js camera); `update` places the source at the given
+ * head-frame position. The level falls with 1/distance, normalized to `gain`
+ * at `REFERENCE_DISTANCE_M` (the panner's own distance models cannot get
+ * louder closer than their reference distance). Starts with the first update
+ * once the shared `audio` context is running.
  */
 export class MotorSound {
   private readonly audio: AudioSystem;
@@ -78,8 +85,8 @@ export class MotorSound {
     this.options = options;
   }
 
-  /** `direction`: unit vector to the source in head coordinates; `lagFraction`: 0..1. */
-  update(direction: Vector3, lagFraction: number): void {
+  /** `position`: of the source in head coordinates, in metres; `lagFraction`: 0..1. */
+  update(position: Vector3, lagFraction: number): void {
     const context = this.audio.runningContext();
 
     if (!context) {
@@ -89,9 +96,14 @@ export class MotorSound {
     const graph = this.graph ?? this.start(context);
     const now = context.currentTime;
 
-    graph.panner.positionX.setTargetAtTime(direction.x, now, POSITION_SMOOTHING_SEC);
-    graph.panner.positionY.setTargetAtTime(direction.y, now, POSITION_SMOOTHING_SEC);
-    graph.panner.positionZ.setTargetAtTime(direction.z, now, POSITION_SMOOTHING_SEC);
+    graph.panner.positionX.setTargetAtTime(position.x, now, POSITION_SMOOTHING_SEC);
+    graph.panner.positionY.setTargetAtTime(position.y, now, POSITION_SMOOTHING_SEC);
+    graph.panner.positionZ.setTargetAtTime(position.z, now, POSITION_SMOOTHING_SEC);
+    graph.distance.gain.setTargetAtTime(
+      REFERENCE_DISTANCE_M / Math.max(MIN_DISTANCE_M, position.length()),
+      now,
+      POSITION_SMOOTHING_SEC,
+    );
 
     if (this.options.revWithLag) {
       const rev = Math.min(1, Math.max(0, lagFraction));
@@ -131,21 +143,28 @@ export class MotorSound {
     const body = new OscillatorNode(context, { type: 'sawtooth', frequency: BODY_HARMONIC * IDLE.firingHz });
     const bodyLowpass = new BiquadFilterNode(context, { type: 'lowpass', frequency: 500 });
     const bodyGain = new GainNode(context, { gain: 0.25 });
-    const panner = new PannerNode(context, { panningModel: 'HRTF', rolloffFactor: 0, positionX: 0, positionY: 0, positionZ: -1 });
+    const panner = new PannerNode(context, {
+      panningModel: 'HRTF',
+      rolloffFactor: 0,
+      positionX: 0,
+      positionY: 0,
+      positionZ: -REFERENCE_DISTANCE_M,
+    });
+    const distance = new GainNode(context, { gain: 1 });
     const master = new GainNode(context, { gain: 0 });
 
     noise.connect(noiseBand).connect(chug).connect(panner);
     firing.connect(firingDepth).connect(chug.gain);
     body.connect(bodyLowpass).connect(bodyGain).connect(panner);
-    panner.connect(master).connect(context.destination);
+    panner.connect(distance).connect(master).connect(context.destination);
 
     const sources = [noise, firing, body];
-    const nodes: AudioNode[] = [...sources, noiseBand, chug, firingDepth, bodyLowpass, bodyGain, panner, master];
+    const nodes: AudioNode[] = [...sources, noiseBand, chug, firingDepth, bodyLowpass, bodyGain, panner, distance, master];
     noise.addEventListener('ended', () => nodes.forEach((node) => node.disconnect()));
     sources.forEach((source) => source.start());
     master.gain.setTargetAtTime(this.options.gain, context.currentTime, this.options.fadeMs / 1000);
 
-    this.graph = { sources, firing, body, noiseBand, panner, master };
+    this.graph = { sources, firing, body, noiseBand, panner, distance, master };
     return this.graph;
   }
 }

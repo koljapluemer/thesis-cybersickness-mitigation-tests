@@ -20,7 +20,10 @@ export type InertialSphereOptions = {
  *
  *     ω' = ωₙ² · e + 2ζωₙ · (ω_rig − ω)
  *
- * integrated semi-implicitly: `ω` first, then `q ← exp(ω·dt) · q`. In rig
+ * integrated semi-implicitly: `q ← exp(ω·dt) · q` first, over the frame the
+ * rig has just turned through, then `ω` against the rig's new orientation. (The
+ * other order would evaluate the spring against a sphere one frame behind, so
+ * in a steady turn the sphere would settle ω_rig·dt ahead of the rig.) In rig
  * coordinates, the lag θ obeys θ'' + 2ζωₙθ' + ωₙ²θ = −α_rig, so a constant
  * angular acceleration α of the rig settles at θ = −α/ωₙ², and a steady turn at
  * θ = 0.
@@ -64,12 +67,12 @@ export class InertialSphere {
     const { quaternion, error, damping } = this.scratch;
     const wn = this.naturalFrequency;
 
+    fromRotationVector(error.copy(this.omega).multiplyScalar(dtSec), quaternion);
+    this.q.premultiply(quaternion).normalize();
+
     rotationVector(quaternion.copy(this.q).invert().premultiply(rigQuaternion), error);
     damping.copy(rigAngularVelocity).sub(this.omega).multiplyScalar(2 * this.dampingRatio * wn);
     this.omega.addScaledVector(error.multiplyScalar(wn * wn).add(damping), dtSec);
-
-    fromRotationVector(error.copy(this.omega).multiplyScalar(dtSec), quaternion);
-    this.q.premultiply(quaternion).normalize();
 
     rotationVector(quaternion.copy(rigQuaternion).invert().multiply(this.q), this.lagVector);
 

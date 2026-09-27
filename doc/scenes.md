@@ -62,7 +62,7 @@ When whatever moves the rig makes it jump instead of moving continuously
 (`src/rig.ts`) right after setting the new pose. Then:
 
 - `rig-kinematics` restarts its history; its next sample has `restarted: true`.
-- `inertial-sound` snaps the sphere to the rig instead of swinging it.
+- `inertial-sound` snaps its sphere or mass to the rig instead of swinging it.
 - `optical-flow` does not measure that frame (`flow: null`).
 - The recorder logs a `rig-teleport` event with the frame's `sceneTimeMs`, and
   `analysis/` computes no rate across it.

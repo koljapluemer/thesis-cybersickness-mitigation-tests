@@ -18,6 +18,7 @@ link with it starts in that condition (see `scenes.md`).
 | `flexible-tone-rig-acceleration` | Flexible Tone (Rig Angular Acceleration) | continuous tone, per-ear loudness following that angular acceleration | off |
 | `inertial-motor-sound-constant` | Inertial Motor Sound (Constant Pitch) | detected and logged, not played | on: world-anchored motor sound lagging behind the rig's rotation, constant timbre (`inertial-sound.md`) |
 | `inertial-motor-sound-revving` | Inertial Motor Sound (Revving Pitch) | detected and logged, not played | on: as above, the motor revs (rising pitch) with the size of the lag |
+| `inertial-motor-sound-linear` | Inertial Motor Sound (Linear Acceleration) | detected and logged, not played | on: motor sound straight below the user, shifted against the rig's linear acceleration (incl. centripetal), constant timbre; rotation alone does not move it |
 
 ## Architecture
 

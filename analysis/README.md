@@ -16,5 +16,6 @@ uv run sound_sphere.py path/to/optical-flow-<date>.json [--out DIR] [--fps N] [-
 ```
 
 For logs of the `inertial-motor-sound-*` conditions: animates the motor sound's source as a point
-with a fading trail on its sphere, in the rig frame and in the head frame, into `sound-sphere.mp4`.
+with a fading trail around the listener, in the rig frame and in the head frame, into `sound-sphere.mp4`.
+For the linear condition, a third panel shows the source's offset from its rest position from above.
 See `../doc/inertial-sound.md`.

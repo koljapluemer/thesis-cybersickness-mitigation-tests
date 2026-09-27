@@ -7,7 +7,7 @@ import { rotationVector } from '../rotation';
 
 const THREE = AFRAME.THREE;
 
-/** Rig orientation and rotation; yaw is about the rig's own (local) up axis, positive = left. */
+/** Rig pose, rotation and translation; yaw is about the rig's own (local) up axis, positive = left. */
 export type RigKinematicsSample = {
   sceneTimeMs: number;
   /** Spacing of the two yaw-rate intervals the acceleration is taken over, in milliseconds. */
@@ -22,6 +22,10 @@ export type RigKinematicsSample = {
   rigQuaternion: [number, number, number, number];
   /** Angular velocity of the rig over the last frame, world frame, in radians per second. */
   angularVelocityRadPerSec: [number, number, number];
+  /** World position of the rig, in metres. */
+  rigPositionM: [number, number, number];
+  /** Velocity of the rig over the last frame, world frame, in metres per second. */
+  linearVelocityMps: [number, number, number];
   /**
    * True for the first sample after the history restarted (start, paused
    * frame, rig teleport): state carried over from earlier samples is stale.
@@ -38,10 +42,11 @@ type RigKinematicsInternals = RigKinematicsSystem & {
   sceneEl: Scene;
   listeners: Set<(sample: RigKinematicsSample) => void>;
   prevQuaternion: Quaternion | null;
+  prevPosition: Vector3 | null;
   prevYawRate: { degPerSec: number; deltaMs: number } | null;
   restarted: boolean;
   teleports: RigTeleportFlag;
-  scratch: { position: Vector3; quaternion: Quaternion; scale: Vector3; relative: Quaternion; rotation: Vector3 };
+  scratch: { position: Vector3; quaternion: Quaternion; scale: Vector3; relative: Quaternion; rotation: Vector3; velocity: Vector3 };
 };
 
 /**
@@ -51,12 +56,14 @@ type RigKinematicsInternals = RigKinematicsSystem & {
  * rig's previous frame is the yaw rate about the rig's **local** up axis. The
  * rig is pitched by `tour-flight`, so this is not the heading change about
  * world up. The yaw acceleration is taken from two consecutive rates, over the
- * spacing of their interval centres.
+ * spacing of their interval centres. The position change over the frame
+ * time is the linear velocity.
  */
 AFRAME.registerSystem('rig-kinematics', {
   init(this: RigKinematicsInternals) {
     this.listeners = new Set();
     this.prevQuaternion = null;
+    this.prevPosition = null;
     this.prevYawRate = null;
     this.restarted = true;
     this.teleports = new RigTeleportFlag(this.sceneEl);
@@ -66,6 +73,7 @@ AFRAME.registerSystem('rig-kinematics', {
       scale: new THREE.Vector3(),
       relative: new THREE.Quaternion(),
       rotation: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
     };
   },
 
@@ -80,6 +88,7 @@ AFRAME.registerSystem('rig-kinematics', {
 
     if (!rig || timeDelta <= 0 || teleported) {
       this.prevQuaternion = null;
+      this.prevPosition = null;
       this.prevYawRate = null;
       this.restarted = true;
     }
@@ -88,11 +97,12 @@ AFRAME.registerSystem('rig-kinematics', {
       return;
     }
 
-    const { position, quaternion, scale, relative, rotation } = this.scratch;
+    const { position, quaternion, scale, relative, rotation, velocity } = this.scratch;
     rig.matrixWorld.decompose(position, quaternion, scale);
 
-    if (!this.prevQuaternion) {
+    if (!this.prevQuaternion || !this.prevPosition) {
       this.prevQuaternion = quaternion.clone();
+      this.prevPosition = position.clone();
       return;
     }
 
@@ -103,6 +113,8 @@ AFRAME.registerSystem('rig-kinematics', {
     // The same angular velocity in world coordinates.
     rotation.applyQuaternion(this.prevQuaternion);
     this.prevQuaternion.copy(quaternion);
+    velocity.copy(position).sub(this.prevPosition).divideScalar(timeDelta / 1000);
+    this.prevPosition.copy(position);
 
     const prev = this.prevYawRate;
     this.prevYawRate = yawRate;
@@ -121,6 +133,8 @@ AFRAME.registerSystem('rig-kinematics', {
       localYawAccelerationDegPerSec2: (yawRate.degPerSec - prev.degPerSec) / (deltaMs / 1000),
       rigQuaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
       angularVelocityRadPerSec: [rotation.x, rotation.y, rotation.z],
+      rigPositionM: [position.x, position.y, position.z],
+      linearVelocityMps: [velocity.x, velocity.y, velocity.z],
       restarted: this.restarted,
     };
     this.restarted = false;

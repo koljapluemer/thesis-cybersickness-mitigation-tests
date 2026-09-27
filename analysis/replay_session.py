@@ -373,22 +373,38 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
 
 
 def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
-    """Lag of the inertial sound's source (sphere lag × lagGain, rig frame, +left) and its head-frame azimuth."""
+    """Deflection of the inertial sound's source.
+
+    Under `motion: rotation` the lag (sphere lag × lagGain, rig frame, +left, deg)
+    and the source's head-frame azimuth; under `translation` the offset (mass
+    offset × offsetGain, rig frame, cm). The azimuth is left out there: around
+    the rest position straight below, it is ill-defined and jumps.
+    """
     config = log["inertialSound"]
     frames = log["frames"]
     samples = log["inertialSoundSamples"]
     rev = "revving" if config["revWithLag"] else "constant timbre"
-    axis.set_ylabel(f"inertial sound (deg)\nT={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, ×{config['lagGain']:g}, {rev}")
+    timing = f"T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}"
+    translation = config["motion"] == "translation"
+    if translation:
+        axis.set_ylabel(f"inertial sound (cm)\ntranslation, {timing}, ×{config['offsetGain']:g}, {rev}")
+    else:
+        axis.set_ylabel(f"inertial sound (deg)\nrotation, {timing}, ×{config['lagGain']:g}, {rev}")
     if not samples or not frames:
         axis.text(0.5, 0.5, "inertial sound disabled", transform=axis.transAxes, ha="center", va="center")
         return
     t = session_time_sec(log, [sample["sceneTimeMs"] for sample in samples])
-    lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
-    direction = np.array([sample["sourceDirectionHead"] for sample in samples])
-    for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):
-        axis.plot(t, lag[:, index], label=f"lag {name}")
-    # Azimuth in the head frame (x right, -z forward), positive = left.
-    axis.plot(t, np.degrees(np.arctan2(-direction[:, 0], -direction[:, 2])), color="grey", alpha=0.6, label="source azimuth (head, +left)")
+    if translation:
+        offset_cm = 100 * np.array([sample["offsetRigM"] for sample in samples])
+        for index, name in enumerate(("right (x)", "up (y)", "back (z)")):
+            axis.plot(t, offset_cm[:, index], label=f"offset {name}")
+    else:
+        lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
+        position = np.array([sample["sourcePositionHead"] for sample in samples])
+        for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):
+            axis.plot(t, lag[:, index], label=f"lag {name}")
+        # Azimuth in the head frame (x right, -z forward), positive = left.
+        axis.plot(t, np.degrees(np.arctan2(-position[:, 0], -position[:, 2])), color="grey", alpha=0.6, label="source azimuth (head, +left)")
     axis.legend(loc="upper right")
 
 
