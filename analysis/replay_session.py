@@ -11,7 +11,7 @@ Usage:
 Without a log argument, the latest `optical-flow-*.json` in the repository's `log/` is used.
 
 Outputs in DIR (default: next to the log, `<log name>-replay/`):
-    timeseries.png   live flow measurements, turn signal and turn cues over the session
+    timeseries.png   live flow measurements, turn signal and turn cues, and the inertial sound's lag over the session
     frames/*.png     per replayed view: reconstruction | live flow | recomputed flow | |difference|
                      (total flow)
                      (live panels are blank on frames without a live field snapshot)
@@ -232,7 +232,7 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frames = [frame for frame in log["frames"] if frame["flow"] is not None]
     t = np.array([frame["timeMs"] / 1000 for frame in frames])
     combined = [frame["flow"]["combined"] for frame in frames]
-    figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
+    figure, axes = plt.subplots(5, 1, figsize=(12, 15), sharex=True)
 
     axes[0].plot(t, [c["total"]["meanDegPerSec"] for c in combined], label="total mean")
     axes[0].plot(t, [c["rigInduced"]["meanDegPerSec"] for c in combined], label="rig-induced mean", linestyle="--")
@@ -252,7 +252,8 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frame_time_axis.plot(t, [frame["deltaMs"] for frame in frames], color="C1", alpha=0.5)
     frame_time_axis.set_ylabel("frame time (ms)", color="C1")
     plot_turn_signal(log, axes[3])
-    axes[3].set_xlabel("session time (s)")
+    plot_inertial_sound(log, axes[4])
+    axes[4].set_xlabel("session time (s)")
 
     for event in log["events"]:
         if event["type"] == "turn-cue":
@@ -293,6 +294,30 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
             axis.axvline(event["timeMs"] / 1000, color=colour, alpha=0.8 if event["presented"] else 0.3)
     unit = TURN_SOURCE_UNITS.get(config["source"], "")
     axis.set_ylabel(f"turn {config['source']} {unit} (+left)\ncondition: {log['condition']} (output: {config['output']})")
+    axis.legend(loc="upper right")
+
+
+def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
+    """Lag of the inertial sound's sphere (rig frame, +left) and the head-frame azimuth of its source."""
+    config = log["inertialSound"]
+    frames = log["frames"]
+    samples = log["inertialSoundSamples"]
+    rev = "revving" if config["revWithLag"] else "constant timbre"
+    axis.set_ylabel(f"inertial sound (deg)\nT={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}, {rev}")
+    if not samples or not frames:
+        axis.text(0.5, 0.5, "inertial sound disabled", transform=axis.transAxes, ha="center", va="center")
+        return
+    t = np.interp(
+        [sample["sceneTimeMs"] for sample in samples],
+        [frame["sceneTimeMs"] for frame in frames],
+        [frame["timeMs"] / 1000 for frame in frames],
+    )
+    lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
+    direction = np.array([sample["sourceDirectionHead"] for sample in samples])
+    for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):
+        axis.plot(t, lag[:, index], label=f"lag {name}")
+    # Azimuth in the head frame (x right, -z forward), positive = left.
+    axis.plot(t, np.degrees(np.arctan2(-direction[:, 0], -direction[:, 2])), color="grey", alpha=0.6, label="source azimuth (head, +left)")
     axis.legend(loc="upper right")
 
 

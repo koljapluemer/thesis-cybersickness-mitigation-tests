@@ -3,22 +3,29 @@ import type { Scene, System } from 'aframe';
 import type { Quaternion, Vector3 } from 'three';
 import type { Unsubscribe } from '../optical-flow/types';
 import { findRig } from '../rig';
+import { rotationVector } from '../rotation';
 
 const THREE = AFRAME.THREE;
 
-/** Rotation of the rig about its own (local) up axis, positive = left. */
+/** Rig orientation and rotation; yaw is about the rig's own (local) up axis, positive = left. */
 export type RigKinematicsSample = {
   sceneTimeMs: number;
   /** Spacing of the two yaw-rate intervals the acceleration is taken over, in milliseconds. */
   deltaMs: number;
+  /** The last frame's interval, which the rates are taken over, in milliseconds. */
+  frameDeltaMs: number;
   /** Over the last frame, in degrees per second. */
   localYawRateDegPerSec: number;
   /** Change of `localYawRateDegPerSec` between the last two frames, in degrees per second squared. */
   localYawAccelerationDegPerSec2: number;
+  /** World orientation of the rig, `[x, y, z, w]`. */
+  rigQuaternion: [number, number, number, number];
+  /** Angular velocity of the rig over the last frame, world frame, in radians per second. */
+  angularVelocityRadPerSec: [number, number, number];
 };
 
 export type RigKinematicsSystem = System & {
-  /** Called every frame once two consecutive yaw rates exist. */
+  /** Called every frame once two consecutive rates exist. */
   onSample(listener: (sample: RigKinematicsSample) => void): Unsubscribe;
 };
 
@@ -27,27 +34,17 @@ type RigKinematicsInternals = RigKinematicsSystem & {
   listeners: Set<(sample: RigKinematicsSample) => void>;
   prevQuaternion: Quaternion | null;
   prevYawRate: { degPerSec: number; deltaMs: number } | null;
-  scratch: { position: Vector3; quaternion: Quaternion; scale: Vector3; relative: Quaternion };
+  scratch: { position: Vector3; quaternion: Quaternion; scale: Vector3; relative: Quaternion; rotation: Vector3 };
 };
 
 /**
- * Rotation of `q` in radians about the y axis of the frame `q` is expressed in:
- * the y component of its rotation vector, taking the shorter of the two
- * equivalent rotations.
- */
-function yawAngle(q: Quaternion): number {
-  const sign = q.w < 0 ? -1 : 1;
-  const sinHalf = Math.hypot(q.x, q.y, q.z);
-  const angleOverSinHalf = sinHalf < 1e-9 ? 2 : (2 * Math.atan2(sinHalf, sign * q.w)) / sinHalf;
-  return sign * q.y * angleOverSinHalf;
-}
-
-/**
- * Rig rotation about its **local** up axis, read from the rig's world pose
- * after all components have moved it (`tock`). The rig is pitched and banked
- * by `tour-flight`, so this is not the heading change about world up. Rates are
- * taken between consecutive frames; the acceleration from two consecutive
- * rates, over the spacing of their interval centres.
+ * Rig rotation, read from the rig's world pose after all components have
+ * moved it (`tock`). The rotation since the previous frame, as a rotation
+ * vector over the frame time, is the angular velocity; its y component in the
+ * rig's previous frame is the yaw rate about the rig's **local** up axis. The
+ * rig is pitched by `tour-flight`, so this is not the heading change about
+ * world up. The yaw acceleration is taken from two consecutive rates, over the
+ * spacing of their interval centres.
  */
 AFRAME.registerSystem('rig-kinematics', {
   init(this: RigKinematicsInternals) {
@@ -59,6 +56,7 @@ AFRAME.registerSystem('rig-kinematics', {
       quaternion: new THREE.Quaternion(),
       scale: new THREE.Vector3(),
       relative: new THREE.Quaternion(),
+      rotation: new THREE.Vector3(),
     };
   },
 
@@ -76,7 +74,7 @@ AFRAME.registerSystem('rig-kinematics', {
       return;
     }
 
-    const { position, quaternion, scale, relative } = this.scratch;
+    const { position, quaternion, scale, relative, rotation } = this.scratch;
     rig.matrixWorld.decompose(position, quaternion, scale);
 
     if (!this.prevQuaternion) {
@@ -86,9 +84,12 @@ AFRAME.registerSystem('rig-kinematics', {
 
     // Rotation since the last frame, expressed in the rig's previous local frame.
     relative.copy(this.prevQuaternion).invert().multiply(quaternion);
+    rotationVector(relative, rotation).divideScalar(timeDelta / 1000);
+    const yawRate = { degPerSec: THREE.MathUtils.radToDeg(rotation.y), deltaMs: timeDelta };
+    // The same angular velocity in world coordinates.
+    rotation.applyQuaternion(this.prevQuaternion);
     this.prevQuaternion.copy(quaternion);
 
-    const yawRate = { degPerSec: THREE.MathUtils.radToDeg(yawAngle(relative)) / (timeDelta / 1000), deltaMs: timeDelta };
     const prev = this.prevYawRate;
     this.prevYawRate = yawRate;
 
@@ -101,8 +102,11 @@ AFRAME.registerSystem('rig-kinematics', {
     const sample: RigKinematicsSample = {
       sceneTimeMs: time,
       deltaMs,
+      frameDeltaMs: timeDelta,
       localYawRateDegPerSec: yawRate.degPerSec,
       localYawAccelerationDegPerSec2: (yawRate.degPerSec - prev.degPerSec) / (deltaMs / 1000),
+      rigQuaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      angularVelocityRadPerSec: [rotation.x, rotation.y, rotation.z],
     };
     this.listeners.forEach((listener) => listener(sample));
   },

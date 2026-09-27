@@ -5,6 +5,7 @@ import './tour-flight';
 import type { TourFlightComponent } from './tour-flight';
 import { getOpticalFlow } from './optical-flow/optical-flow-system';
 import { getTurnCues } from './turn-cues/turn-cue-system';
+import { getInertialSound } from './inertial-sound/inertial-sound-system';
 import { getCondition } from './conditions/condition-system';
 import './conditions/condition-cycle';
 import { mountConditionSelect } from './conditions/condition-select';
@@ -68,17 +69,24 @@ if (!sceneEl || !landscapeEl || !rigEl) {
 
 sceneEl.addEventListener('loaded', () => {
   const tourFlight = rigEl.components['tour-flight'] as unknown as TourFlightComponent;
-  const recorder = new FlowSessionRecorder(sceneEl, getOpticalFlow(sceneEl), getTurnCues(sceneEl), getCondition(sceneEl), {
-    fieldSnapshotIntervalMs: 500,
-    pathTimeSec: () => tourFlight.pathTimeSec,
-    describeScene: () => {
-      landscapeEl.object3D.updateWorldMatrix(true, false);
-      return {
-        landscape: { src: LANDSCAPE_SRC, matrixWorld: landscapeEl.object3D.matrixWorld.toArray() },
-        tour: { ...tourFlight.data },
-      };
+  const recorder = new FlowSessionRecorder(
+    sceneEl,
+    getOpticalFlow(sceneEl),
+    getTurnCues(sceneEl),
+    getInertialSound(sceneEl),
+    getCondition(sceneEl),
+    {
+      fieldSnapshotIntervalMs: 500,
+      pathTimeSec: () => tourFlight.pathTimeSec,
+      describeScene: () => {
+        landscapeEl.object3D.updateWorldMatrix(true, false);
+        return {
+          landscape: { src: LANDSCAPE_SRC, matrixWorld: landscapeEl.object3D.matrixWorld.toArray() },
+          tour: { ...tourFlight.data },
+        };
+      },
     },
-  });
+  );
 
   mountRecordingButton(app, recorder);
   mountConditionSelect(app, getCondition(sceneEl));

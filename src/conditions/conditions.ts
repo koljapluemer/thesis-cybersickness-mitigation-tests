@@ -1,4 +1,6 @@
 // Registers the mitigation systems configured below.
+import '../inertial-sound/inertial-sound-system';
+import type { InertialSoundData } from '../inertial-sound/inertial-sound-system';
 import '../turn-cues/turn-cue-system';
 import type { TurnCueData } from '../turn-cues/turn-cue-system';
 
@@ -9,6 +11,7 @@ import type { TurnCueData } from '../turn-cues/turn-cue-system';
  */
 export type MitigationConfigs = {
   'turn-cues': Partial<TurnCueData>;
+  'inertial-sound': Partial<InertialSoundData>;
 };
 
 export type Condition = {
@@ -30,33 +33,47 @@ const RIG_ANGULAR_ACCELERATION = {
   fullScale: 30,
 } as const satisfies Partial<TurnCueData>;
 
+const NO_INERTIAL_SOUND = { enabled: false } as const satisfies Partial<InertialSoundData>;
+
 /** The experimental conditions, in select and cycle order. */
 export const CONDITIONS = [
   {
     id: 'no-mitigation',
     label: 'No Mitigation',
     // Cues are still detected and logged, just not played: the silent control.
-    mitigations: { 'turn-cues': { output: 'none' } },
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': NO_INERTIAL_SOUND },
   },
   {
     id: 'turn-tone-optical-flow',
     label: 'Turn Tone (Optical Flow)',
-    mitigations: { 'turn-cues': { output: 'stereo-tone' } },
+    mitigations: { 'turn-cues': { output: 'stereo-tone' }, 'inertial-sound': NO_INERTIAL_SOUND },
   },
   {
     id: 'flexible-tone-optical-flow',
     label: 'Flexible Tone (Optical Flow)',
-    mitigations: { 'turn-cues': { output: 'flexible-tone' } },
+    mitigations: { 'turn-cues': { output: 'flexible-tone' }, 'inertial-sound': NO_INERTIAL_SOUND },
   },
   {
     id: 'turn-tone-rig-acceleration',
     label: 'Turn Tone (Rig Angular Acceleration)',
-    mitigations: { 'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'stereo-tone' } },
+    mitigations: {
+      'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'stereo-tone' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+    },
   },
   {
     id: 'flexible-tone-rig-acceleration',
     label: 'Flexible Tone (Rig Angular Acceleration)',
-    mitigations: { 'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'flexible-tone' } },
+    mitigations: {
+      'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'flexible-tone' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+    },
+  },
+  {
+    id: 'inertial-motor-sound',
+    label: 'Inertial Motor Sound',
+    // Turn cues are detected and logged as in the control, not played.
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true } },
   },
 ] as const satisfies readonly Condition[];
 

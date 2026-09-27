@@ -1,5 +1,7 @@
 import type { ConditionSystem } from '../conditions/condition-system';
 import type { ConditionId } from '../conditions/conditions';
+import type { InertialSoundData, InertialSoundSample, InertialSoundSystem } from '../inertial-sound/inertial-sound-system';
+import { REV_WITH_LAG } from '../inertial-sound/motor-sound';
 import type { TurnCueData, TurnCueSystem } from '../turn-cues/turn-cue-system';
 import type { TurnCue, TurnSignal } from '../turn-cues/types';
 import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
@@ -47,7 +49,7 @@ export type LoggedEvent =
 
 export type SessionLog = {
   format: 'optical-flow-session';
-  version: 4;
+  version: 5;
   startedAt: string;
   endedAt: string;
   userAgent: string;
@@ -61,11 +63,15 @@ export type SessionLog = {
   condition: ConditionId;
   /** Effective `turn-cues` configuration under that condition. */
   turnCues: TurnCueData;
+  /** Effective `inertial-sound` configuration, plus the motor's `REV_WITH_LAG` build constant. */
+  inertialSound: InertialSoundData & { revWithLag: boolean };
   scene: SceneDescription;
   events: LoggedEvent[];
   frames: LoggedFrame[];
   /** Every accepted turn-rate sample of the cue detector, raw and smoothed. */
   turnSignals: TurnSignal[];
+  /** Every frame of the inertial sound; empty while it is disabled. */
+  inertialSoundSamples: InertialSoundSample[];
 };
 
 export type RecorderOptions = {
@@ -98,6 +104,7 @@ export class FlowSessionRecorder {
   private readonly sceneEl: Element;
   private readonly meter: OpticalFlowSystem;
   private readonly turnCues: TurnCueSystem;
+  private readonly inertialSound: InertialSoundSystem;
   private readonly conditions: ConditionSystem;
   private readonly options: RecorderOptions;
   private log: SessionLog | null = null;
@@ -110,12 +117,14 @@ export class FlowSessionRecorder {
     sceneEl: Element,
     meter: OpticalFlowSystem,
     turnCues: TurnCueSystem,
+    inertialSound: InertialSoundSystem,
     conditions: ConditionSystem,
     options: RecorderOptions,
   ) {
     this.sceneEl = sceneEl;
     this.meter = meter;
     this.turnCues = turnCues;
+    this.inertialSound = inertialSound;
     this.conditions = conditions;
     this.options = options;
   }
@@ -138,7 +147,7 @@ export class FlowSessionRecorder {
     this.framesByNumber.clear();
     this.log = {
       format: 'optical-flow-session',
-      version: 4,
+      version: 5,
       startedAt: new Date().toISOString(),
       endedAt: '',
       userAgent: navigator.userAgent,
@@ -150,10 +159,12 @@ export class FlowSessionRecorder {
       },
       condition: this.conditions.state.id,
       turnCues: { ...this.turnCues.data },
+      inertialSound: { ...this.inertialSound.data, revWithLag: REV_WITH_LAG },
       scene: this.options.describeScene(),
       events: [],
       frames: [],
       turnSignals: [],
+      inertialSoundSamples: [],
     };
 
     const onXrEvent = (event: Event) => this.log?.events.push({ timeMs: this.elapsedMs(), type: event.type as 'enter-vr' | 'exit-vr' });
@@ -164,6 +175,7 @@ export class FlowSessionRecorder {
       this.conditions.lock(),
       this.meter.onSample((sample) => this.recordSample(sample)),
       this.turnCues.onSignal((signal) => this.log?.turnSignals.push(signal)),
+      this.inertialSound.onSample((sample) => this.log?.inertialSoundSamples.push(sample)),
       this.turnCues.onCue((cue) => this.log?.events.push({ timeMs: this.elapsedMs(), type: 'turn-cue', ...cue })),
       () => XR_EVENTS.forEach((type) => this.sceneEl.removeEventListener(type, onXrEvent)),
     ];

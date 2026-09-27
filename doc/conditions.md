@@ -5,20 +5,21 @@ conditions are switched with the select in the bottom-left corner. In VR, the
 B button on the right controller cycles through them; the select shows the
 current one but is not meant to be used from VR.
 
-| id | label | turn cues |
-|---|---|---|
-| `no-mitigation` | No Mitigation | detected and logged, not played |
-| `turn-tone-optical-flow` | Turn Tone (Optical Flow) | stereo tones, turns from the optical flow (`turn-cues.md`) |
-| `flexible-tone-optical-flow` | Flexible Tone (Optical Flow) | continuous tone, per-ear loudness following the optical-flow turn rate |
-| `turn-tone-rig-acceleration` | Turn Tone (Rig Angular Acceleration) | stereo tones, turns from the rig's angular acceleration about its local up axis |
-| `flexible-tone-rig-acceleration` | Flexible Tone (Rig Angular Acceleration) | continuous tone, per-ear loudness following that angular acceleration |
+| id | label | turn cues | inertial sound |
+|---|---|---|---|
+| `no-mitigation` | No Mitigation | detected and logged, not played | off |
+| `turn-tone-optical-flow` | Turn Tone (Optical Flow) | stereo tones, turns from the optical flow (`turn-cues.md`) | off |
+| `flexible-tone-optical-flow` | Flexible Tone (Optical Flow) | continuous tone, per-ear loudness following the optical-flow turn rate | off |
+| `turn-tone-rig-acceleration` | Turn Tone (Rig Angular Acceleration) | stereo tones, turns from the rig's angular acceleration about its local up axis | off |
+| `flexible-tone-rig-acceleration` | Flexible Tone (Rig Angular Acceleration) | continuous tone, per-ear loudness following that angular acceleration | off |
+| `inertial-motor-sound` | Inertial Motor Sound | detected and logged, not played | on: world-anchored motor sound lagging behind the rig's rotation (`inertial-sound.md`) |
 
 ## Architecture
 
 Code lives in `src/conditions/`.
 
-- **Mitigations** are A-Frame scene systems with a schema (so far only
-  `turn-cues`). They know nothing about conditions and are configured only
+- **Mitigations** are A-Frame scene systems with a schema (`turn-cues`,
+  `inertial-sound`). They know nothing about conditions and are configured only
   through their schema.
 - **`conditions.ts`** is the registry: `CONDITIONS` lists each condition's id,
   label and `mitigations`, the config of *every* mitigation system
@@ -39,7 +40,7 @@ Code lives in `src/conditions/`.
 
 The recorder locks the condition for the whole recording: the select is
 disabled, and the B button does nothing. The log stores `condition`
-(the id) and the effective `turnCues` configuration.
+(the id) and the effective `turnCues` and `inertialSound` configurations.
 
 ## Adding a condition
 

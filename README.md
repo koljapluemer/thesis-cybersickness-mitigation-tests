@@ -22,12 +22,15 @@ head-locked HUD rotation indicators have since been removed.
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
 | `src/turn-cues/` | Turn cues (`turn-cues` A-Frame system): turn strength from the live rig-induced flow or from the rig's angular acceleration about its local up axis → detector → left/right stereo tone, or a continuous tone whose per-ear loudness follows the turn strength. See `doc/turn-cues.md`. |
 | `src/conditions/` | Experimental conditions (`condition` A-Frame system): registry of conditions, each configuring every mitigation system, plus the DOM select and the VR controller cycling to switch them. See `doc/conditions.md`. |
-| `src/rig-kinematics/` | `rig-kinematics` A-Frame system: per-frame rig yaw rate and angular acceleration about the rig's local up axis. |
-| `src/rig.ts` | Finds the rig (the camera entity's parent), shared by `optical-flow` and `rig-kinematics`. |
+| `src/rig-kinematics/` | `rig-kinematics` A-Frame system: per-frame rig orientation and angular velocity (world frame), and the yaw rate and angular acceleration about the rig's local up axis. |
+| `src/inertial-sound/` | Inertial motor sound (`inertial-sound` A-Frame system): an HRTF-spatialized, world-anchored motor sound on a sphere that follows the rig's rotation through a spring and damper, so it swings out when the rig's rotation accelerates. See `doc/inertial-sound.md`. |
+| `src/rig.ts` | Finds the rig (the camera entity's parent) and the head's world matrix; shared by `optical-flow`, `rig-kinematics` and `inertial-sound`. |
+| `src/rotation.ts` | Quaternion ↔ rotation vector (log/exp map). |
 | `src/audio/` | `audio` A-Frame system: the scene's shared, gesture-unlocked `AudioContext`. |
 | `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
 | `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
 | `doc/turn-cues.md` | Turn cue pipeline, configuration and audio unlock. |
+| `doc/inertial-sound.md` | Inertial sound: model, sound, configuration and logging. |
 | `doc/conditions.md` | Experimental conditions: architecture, switching, adding conditions and mitigations. |
 | `analysis/` | uv project; `replay_session.py` replays a session log offline, validates the live flow measurement and compares it with the pose kinematics. |
 | `doc/pose-flow-agreement.md` | Rig and head kinematics from the logged poses and the statistics of their agreement with the optical flow. |
@@ -63,9 +66,12 @@ head-locked HUD rotation indicators have since been removed.
   live rig-induced flow or the rig's angular acceleration and plays an 800 Hz
   tone on the left or right channel.
   Configured by the selected condition. Details: `doc/turn-cues.md`.
+- **`inertial-sound` system** (configured on `<a-scene>`) — a motor sound
+  that lags behind the rig's rotation, world-anchored and spatialized.
+  Configured by the selected condition. Details: `doc/inertial-sound.md`.
 - **`condition` system** (`condition="…"` on `<a-scene>`) — the experimental
   condition (No Mitigation, and Turn Tone / Flexible Tone each from Optical Flow
-  or Rig Angular Acceleration), switchable with the select in the
+  or Rig Angular Acceleration, Inertial Motor Sound), switchable with the select in the
   bottom-left corner or, in VR, cycled with B on the right controller. Locked
   while recording.
   Details: `doc/conditions.md`.
