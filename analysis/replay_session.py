@@ -41,7 +41,7 @@ import trimesh
 from PIL import Image, ImageDraw
 
 from pose_flow import analyse as analyse_pose_flow
-from session_log import LOG_DIR, REPO_DIR, latest_log, load_log, mat4
+from session_log import LOG_DIR, REPO_DIR, latest_log, load_log, mat4, session_time_sec
 
 PUBLIC_DIR = REPO_DIR / "public"
 COMPONENTS = ("total", "rigInduced")
@@ -277,12 +277,7 @@ def plot_turn_signal(log: dict, axis: plt.Axes) -> None:
     frames = log["frames"]
     signals = log["turnSignals"]
     if signals and frames:
-        # Signals carry scene time; map it to session time via the frames.
-        t = np.interp(
-            [signal["sceneTimeMs"] for signal in signals],
-            [frame["sceneTimeMs"] for frame in frames],
-            [frame["timeMs"] / 1000 for frame in frames],
-        )
+        t = session_time_sec(log, [signal["sceneTimeMs"] for signal in signals])
         axis.plot(t, [signal["strength"] for signal in signals], color="C0", alpha=0.35, label="raw")
         axis.plot(t, [signal["smoothed"] for signal in signals], color="C0", label="smoothed")
     for sign in (1, -1):
@@ -307,11 +302,7 @@ def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
     if not samples or not frames:
         axis.text(0.5, 0.5, "inertial sound disabled", transform=axis.transAxes, ha="center", va="center")
         return
-    t = np.interp(
-        [sample["sceneTimeMs"] for sample in samples],
-        [frame["sceneTimeMs"] for frame in frames],
-        [frame["timeMs"] / 1000 for frame in frames],
-    )
+    t = session_time_sec(log, [sample["sceneTimeMs"] for sample in samples])
     lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
     direction = np.array([sample["sourceDirectionHead"] for sample in samples])
     for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):

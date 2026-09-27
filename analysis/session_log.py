@@ -9,7 +9,7 @@ import numpy as np
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO_DIR / "log"
-LOG_VERSION = 5
+LOG_VERSION = 6
 
 
 def mat4(values: list[float]) -> np.ndarray:
@@ -30,3 +30,9 @@ def load_log(path: Path) -> dict:
     if log.get("version") != LOG_VERSION:
         raise SystemExit(f"log format version {log.get('version')} is not supported (expected {LOG_VERSION})")
     return log
+
+
+def session_time_sec(log: dict, scene_times_ms: list[float]) -> np.ndarray:
+    """Scene times (as keyed by samples and signals) -> session time in seconds, via the frames."""
+    frames = log["frames"]
+    return np.interp(scene_times_ms, [frame["sceneTimeMs"] for frame in frames], [frame["timeMs"] / 1000 for frame in frames])

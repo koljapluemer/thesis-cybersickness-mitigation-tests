@@ -115,7 +115,7 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 5):
+(`SessionLog`, format version 6):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
 - `condition`: the experimental condition id (see `conditions.md`). It is
@@ -132,8 +132,8 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
   (`strength`) and `smoothed`, keyed by `sceneTimeMs`, in the unit of the
   configured source (see `turn-cues.md`).
 - `inertialSoundSamples[]`: one per frame while the inertial sound is
-  enabled, else empty: `lagRotationVectorDeg` (rig frame), `sourceDirectionHead`
-  and `lagFraction`, keyed by `sceneTimeMs` (see `inertial-sound.md`).
+  enabled, else empty: `lagRotationVectorDeg` (rig frame), `sourceDirectionRig`,
+  `sourceDirectionHead` and `lagFraction`, keyed by `sceneTimeMs` (see `inertial-sound.md`).
 - `frames[]`, one per rendered frame:
   - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `pathTimeSec`,
     `xrPresenting`

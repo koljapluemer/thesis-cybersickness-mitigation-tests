@@ -102,9 +102,12 @@ more slowly.
 The session log stores the effective configuration (`inertialSound`,
 including `revWithLag`) and one `inertialSoundSamples[]` entry per frame:
 `lagRotationVectorDeg` (rig frame, x pitch / y yaw / z roll, y > 0 = sound
-turned left), `sourceDirectionHead` (unit vector, head frame) and
+turned left), `sourceDirectionRig` (unit vector, rig frame: the source's
+place on the sphere), `sourceDirectionHead` (unit vector, head frame) and
 `lagFraction`. `analysis/replay_session.py` plots the lag components and the
 source's head-frame azimuth in the last panel of `timeseries.png`.
+`analysis/sound_sphere.py` animates the source as a point with a trail on the
+sphere, in the rig frame and in the head frame side by side.
 
 ## Limitations
 
