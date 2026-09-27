@@ -1,16 +1,6 @@
 import type { Vector3 } from 'three';
 import type { AudioSystem } from '../audio/audio-system';
 
-/**
- * Whether the motor "revs" with the lag. `true`: firing rate, body pitch and
- * noise band rise with `lagFraction` (lag / `maxLagDeg`), from the idle values
- * below at rest to the rev values at the maximum lag, so the size of the
- * deviation is audible even where HRTF localization is weak (front/back,
- * elevation). `false`: constant idle timbre; only the source position carries
- * information. Logged as `inertialSound.revWithLag`.
- */
-export const REV_WITH_LAG = true;
-
 const IDLE = { firingHz: 25, noiseBandHz: 1000 } as const;
 const REV = { firingHz: 60, noiseBandHz: 2500 } as const;
 /** The sawtooth body sounds at this multiple of the firing rate. */
@@ -26,6 +16,15 @@ export type MotorSoundOptions = {
   gain: number;
   /** Time constant of the fade in and out, in milliseconds. */
   fadeMs: number;
+  /**
+   * Whether the motor "revs" with the lag. `true`: firing rate, body pitch and
+   * noise band rise with `lagFraction` (lag / `maxLagDeg`), from the idle values
+   * below at rest to the rev values at the maximum lag, so the size of the
+   * deviation is audible even where HRTF localization is weak (front/back,
+   * elevation). `false`: constant idle timbre; only the source position carries
+   * information.
+   */
+  revWithLag: boolean;
 };
 
 type MotorGraph = {
@@ -94,7 +93,7 @@ export class MotorSound {
     graph.panner.positionY.setTargetAtTime(direction.y, now, POSITION_SMOOTHING_SEC);
     graph.panner.positionZ.setTargetAtTime(direction.z, now, POSITION_SMOOTHING_SEC);
 
-    if (REV_WITH_LAG) {
+    if (this.options.revWithLag) {
       const rev = Math.min(1, Math.max(0, lagFraction));
       const firingHz = IDLE.firingHz + rev * (REV.firingHz - IDLE.firingHz);
       graph.firing.frequency.setTargetAtTime(firingHz, now, REV_SMOOTHING_SEC);

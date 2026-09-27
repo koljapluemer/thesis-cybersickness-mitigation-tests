@@ -121,8 +121,8 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
 - `condition`: the experimental condition id (see `conditions.md`). It is
   locked while recording, so there is one per log.
 - `turnCues`: the effective `turn-cues` configuration under that condition.
-- `inertialSound`: the effective `inertial-sound` configuration, plus
-  `revWithLag` (the `REV_WITH_LAG` constant the build was made with).
+- `inertialSound`: the effective `inertial-sound` configuration under that
+  condition.
 - `scene`: landscape glTF path and world matrix, `tour-flight` settings.
   Together with the per-frame poses, this is enough to re-render every frame
   offline.

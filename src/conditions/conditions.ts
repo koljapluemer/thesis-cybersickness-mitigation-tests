@@ -69,11 +69,16 @@ export const CONDITIONS = [
       'inertial-sound': NO_INERTIAL_SOUND,
     },
   },
+  // Inertial sound conditions: turn cues are detected and logged as in the control, not played.
   {
-    id: 'inertial-motor-sound',
-    label: 'Inertial Motor Sound',
-    // Turn cues are detected and logged as in the control, not played.
-    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true } },
+    id: 'inertial-motor-sound-constant',
+    label: 'Inertial Motor Sound (Constant Pitch)',
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: false } },
+  },
+  {
+    id: 'inertial-motor-sound-revving',
+    label: 'Inertial Motor Sound (Revving Pitch)',
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: true } },
   },
 ] as const satisfies readonly Condition[];
 

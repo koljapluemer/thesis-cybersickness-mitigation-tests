@@ -15,6 +15,6 @@ flow agrees with them. See `../doc/pose-flow-agreement.md`.
 uv run sound_sphere.py path/to/optical-flow-<date>.json [--out DIR] [--fps N] [--trail SEC] [--start SEC] [--end SEC]
 ```
 
-For logs of the `inertial-motor-sound` condition: animates the motor sound's source as a point
+For logs of the `inertial-motor-sound-*` conditions: animates the motor sound's source as a point
 with a fading trail on its sphere, in the rig frame and in the head frame, into `sound-sphere.mp4`.
 See `../doc/inertial-sound.md`.

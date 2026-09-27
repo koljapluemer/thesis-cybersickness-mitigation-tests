@@ -71,7 +71,7 @@ head-locked HUD rotation indicators have since been removed.
   Configured by the selected condition. Details: `doc/inertial-sound.md`.
 - **`condition` system** (`condition="…"` on `<a-scene>`) — the experimental
   condition (No Mitigation, and Turn Tone / Flexible Tone each from Optical Flow
-  or Rig Angular Acceleration, Inertial Motor Sound), switchable with the select in the
+  or Rig Angular Acceleration, Inertial Motor Sound with constant or revving pitch), switchable with the select in the
   bottom-left corner or, in VR, cycled with B on the right controller. Locked
   while recording.
   Details: `doc/conditions.md`.

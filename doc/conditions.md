@@ -12,7 +12,8 @@ current one but is not meant to be used from VR.
 | `flexible-tone-optical-flow` | Flexible Tone (Optical Flow) | continuous tone, per-ear loudness following the optical-flow turn rate | off |
 | `turn-tone-rig-acceleration` | Turn Tone (Rig Angular Acceleration) | stereo tones, turns from the rig's angular acceleration about its local up axis | off |
 | `flexible-tone-rig-acceleration` | Flexible Tone (Rig Angular Acceleration) | continuous tone, per-ear loudness following that angular acceleration | off |
-| `inertial-motor-sound` | Inertial Motor Sound | detected and logged, not played | on: world-anchored motor sound lagging behind the rig's rotation (`inertial-sound.md`) |
+| `inertial-motor-sound-constant` | Inertial Motor Sound (Constant Pitch) | detected and logged, not played | on: world-anchored motor sound lagging behind the rig's rotation, constant timbre (`inertial-sound.md`) |
+| `inertial-motor-sound-revving` | Inertial Motor Sound (Revving Pitch) | detected and logged, not played | on: as above, the motor revs (rising pitch) with the size of the lag |
 
 ## Architecture
 

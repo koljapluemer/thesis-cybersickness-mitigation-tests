@@ -24,6 +24,11 @@ export type InertialSoundData = {
   maxLagDeg: number;
   /** Rest direction of the source below the rig's forward axis (itself pitched down by `tour-flight`), in degrees. */
   elevationDeg: number;
+  /**
+   * Whether the motor revs with the lag (firing rate, body pitch and noise band
+   * rise with `lagFraction`) or keeps a constant timbre. See `MotorSound`.
+   */
+  revWithLag: boolean;
   gain: number;
   /** Time constant of the fade in and out, in milliseconds. */
   fadeMs: number;
@@ -84,6 +89,7 @@ AFRAME.registerSystem('inertial-sound', {
     dampingRatio: { type: 'number', default: 1 },
     maxLagDeg: { type: 'number', default: 150 },
     elevationDeg: { type: 'number', default: -30 },
+    revWithLag: { type: 'boolean', default: false },
     gain: { type: 'number', default: 0.3 },
     fadeMs: { type: 'number', default: 50 },
   },
@@ -118,7 +124,7 @@ AFRAME.registerSystem('inertial-sound', {
     this.scratch.rest.set(0, Math.sin(elevation), -Math.cos(elevation));
 
     const sphere = new InertialSphere(data);
-    const sound = new MotorSound(getAudio(this.sceneEl), { gain: data.gain, fadeMs: data.fadeMs });
+    const sound = new MotorSound(getAudio(this.sceneEl), { gain: data.gain, fadeMs: data.fadeMs, revWithLag: data.revWithLag });
     let aligned = false;
 
     this.sound = sound;

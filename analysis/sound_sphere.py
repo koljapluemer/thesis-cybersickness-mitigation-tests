@@ -9,7 +9,7 @@ Usage:
     cd analysis && uv run sound_sphere.py [optical-flow-<date>.json] [--out DIR] [--fps N] [--trail SEC] [--start SEC] [--end SEC]
 
 Without a log argument, the latest `optical-flow-*.json` in the repository's `log/` is used.
-The log must have been recorded under the `inertial-motor-sound` condition.
+The log must have been recorded under an `inertial-motor-sound-*` condition.
 
 Output in DIR (default: next to the log, `<log name>-replay/`):
     sound-sphere.mp4   the animation, in session time

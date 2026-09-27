@@ -69,8 +69,7 @@ with the first sample once audio is unlocked (see `turn-cues.md`):
   at 1 m in the head-frame direction (`setTargetAtTime`, 20 ms), so
   `AudioListener` is never touched.
 
-**`REV_WITH_LAG`** (constant at the top of `motor-sound.ts`, logged as
-`inertialSound.revWithLag`):
+**`revWithLag`** (schema property, set per condition):
 
 - `true`: the firing rate (25 → 60 Hz), the body pitch and the noise band
   (1 → 2.5 kHz) rise with `lagFraction` = lag / `maxLagDeg`, so the size of the
@@ -82,7 +81,8 @@ Switching condition fades the sound out and releases its nodes.
 ## Configuration
 
 Set by the experimental condition (`conditions.md`); only
-`inertial-motor-sound` enables it.
+`inertial-motor-sound-constant` and `inertial-motor-sound-revving` enable it,
+differing only in `revWithLag`.
 
 | property | default | |
 |---|---|---|
@@ -91,6 +91,7 @@ Set by the experimental condition (`conditions.md`); only
 | `dampingRatio` | 1 | 1 = critically damped, no wobble of its own |
 | `maxLagDeg` | 150 | lag clamp; also the lag of full rev |
 | `elevationDeg` | −30 | rest direction below the rig's forward axis |
+| `revWithLag` | false | motor revs with the lag (see above) |
 | `gain` / `fadeMs` | 0.3 / 50 | output level, fade in/out time constant |
 
 **Untuned:** a turn onset of 15 °/s² over 2 s peaks at only ≈ 11° lag with the

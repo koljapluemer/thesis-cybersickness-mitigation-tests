@@ -1,7 +1,6 @@
 import type { ConditionSystem } from '../conditions/condition-system';
 import type { ConditionId } from '../conditions/conditions';
 import type { InertialSoundData, InertialSoundSample, InertialSoundSystem } from '../inertial-sound/inertial-sound-system';
-import { REV_WITH_LAG } from '../inertial-sound/motor-sound';
 import type { TurnCueData, TurnCueSystem } from '../turn-cues/turn-cue-system';
 import type { TurnCue, TurnSignal } from '../turn-cues/types';
 import { ECCENTRICITY_BANDS_DEG } from './flow-stats';
@@ -63,8 +62,8 @@ export type SessionLog = {
   condition: ConditionId;
   /** Effective `turn-cues` configuration under that condition. */
   turnCues: TurnCueData;
-  /** Effective `inertial-sound` configuration, plus the motor's `REV_WITH_LAG` build constant. */
-  inertialSound: InertialSoundData & { revWithLag: boolean };
+  /** Effective `inertial-sound` configuration. */
+  inertialSound: InertialSoundData;
   scene: SceneDescription;
   events: LoggedEvent[];
   frames: LoggedFrame[];
@@ -159,7 +158,7 @@ export class FlowSessionRecorder {
       },
       condition: this.conditions.state.id,
       turnCues: { ...this.turnCues.data },
-      inertialSound: { ...this.inertialSound.data, revWithLag: REV_WITH_LAG },
+      inertialSound: { ...this.inertialSound.data },
       scene: this.options.describeScene(),
       events: [],
       frames: [],
