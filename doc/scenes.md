@@ -1,11 +1,12 @@
 # Test scenes
 
-A test scene is the world and the way the rig moves through it. Two exist:
+A test scene is the world and the way the rig moves through it. Three exist:
 
 | id | label | rig motion |
 |---|---|---|
 | `mountain-flight` | Mountain Flight | `tour-flight`: automatic helicopter flight along a scripted path over a mountain landscape; the user can only look around |
 | `car-race` | Car Race | `car-drive`: the user drives a formula car around a race track, seen from the cockpit |
+| `city-drive` | City Drive | `straight-drive`: the formula car stands in a city street, accelerates straight ahead from standstill for a fixed time, then jumps back to the start, in a loop; the user can only look around |
 
 Every mitigation works in every scene: the mitigation systems only read the
 rig (the camera's parent, `src/rig.ts`) and know nothing about scenes.
@@ -49,7 +50,9 @@ Code lives in `src/scenes/`.
 - **`rig-markup.ts`**: `rigMarkup(attributes)`, the rig every scene uses: the
   camera and the right controller whose B button cycles the condition.
   Scenes only choose where the rig sits and what moves it.
-- **`mountain-flight.ts`**, **`car-race.ts`**: the two scenes.
+- **`mountain-flight.ts`**, **`car-race.ts`**, **`city-drive.ts`**: the scenes.
+- **`formula-car.ts`**: the formula car with the rig on its seat, shared by
+  Car Race and City Drive; the scene only chooses the component moving `#car`.
 - **`url-selection.ts`**, **`scene-select.ts`**: see above.
 
 `src/main.ts` builds `<a-scene>` with the shared lights and systems around the
@@ -145,7 +148,7 @@ entity's pose. Its schema holds the `CarTuning` values:
 ```
 #car        car-drive          origin: centre of mass on the ground
 ├─ #car-body  gltf, rig-fixed
-└─ #rig       seat, at the driver's eye (SEAT_POSITION in car-race.ts)
+└─ #rig       seat, at the driver's eye (SEAT_POSITION in formula-car.ts)
    ├─ camera
    └─ right controller
 ```
@@ -177,6 +180,38 @@ The car's pose is in `rigMatrixWorld`.
 
 Blender units were scaled by 2.5 to metres (the car is then 5.5 m long) and
 converted from Z-up to Y-up: `(x, y, z) → (x, z, −y)`.
+
+## City Drive
+
+Code lives in `src/city-drive/`. The city is the staircase repo's
+(`thesis-cybersickness-staircase`): `public/city/city.glb` and `sky.jpg` were
+exported there from `blender/city_scene.blend` by `scripts/export_city.py`
+(lights removed, materials baked, Draco geometry, WebP textures). The Draco
+decoder loads from A-Frame's default CDN (gstatic), so the headset needs
+internet access. The car and rig are the Car Race's (`formula-car.ts`).
+
+`straight-drive` (`straight-drive.ts`) moves `#car` in cycles:
+
+1. It puts the car on the start pose (an announced rig teleport) and holds it
+   still for `holdS`.
+2. It accelerates from standstill at `acceleration` for `durationS`, straight
+   along the heading; the distance ½·a·t² is evaluated at each frame's time.
+3. It jumps back to 1.
+
+`RUN` in `src/scenes/city-drive.ts` sets `acceleration` (3 m/s²),
+`durationS` (10 s) and `holdS` (2 s). The road ahead must be clear for
+½·a·t² (150 m with these values).
+
+### Start pose
+
+`START_POSE_BLENDER` in `src/city-drive/start-pose.ts` holds the car's ground
+point and a second point it drives towards, in **Blender** coordinates of the
+city (Z up), so they can be read straight off the .blend: put the 3D cursor on
+the road (Shift + right-click) and copy its location from the N panel → View →
+3D Cursor. `startPose()` converts them to A-Frame (`(x, y, z) → (x, z, −y)`)
+and to a heading. It is still a placeholder (the origin, facing +Y).
+
+Logged per frame: `cycle`, `distanceM`, `speedMps`. Reference space: `local`.
 
 ## Mountain Flight
 

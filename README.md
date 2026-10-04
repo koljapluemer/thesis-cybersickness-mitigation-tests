@@ -1,8 +1,9 @@
 # Optical Flow Test
 
-A WebXR (A-Frame) app for testing cybersickness mitigations in two scenes: an
-automatic helicopter flight along a scripted path over a 3D landscape, and a
-car race the player drives from the cockpit. Works on desktop and in VR. Scene
+A WebXR (A-Frame) app for testing cybersickness mitigations in three scenes: an
+automatic helicopter flight along a scripted path over a 3D landscape, a
+car race the player drives from the cockpit, and a city street in which the
+car accelerates straight ahead for a fixed time. Works on desktop and in VR. Scene
 and condition are chosen in the bottom-left selects or through the URL
 (`?scene=car-race&condition=no-mitigation`), see `doc/scenes.md`.
 
@@ -23,6 +24,7 @@ head-locked HUD rotation indicators have since been removed.
 | `src/main.ts` | Builds `<a-scene>` around the selected test scene and wires the flow recorder, its button and the scene and condition selects. |
 | `src/scenes/` | Test scene registry (`SCENES`), the shared rig markup, scene and condition selection through the URL, and the scene select. See `doc/scenes.md`. |
 | `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path (Mountain Flight). |
+| `src/city-drive/` | City Drive: `straight-drive` component (hold, constant acceleration, jump back) and the start pose in Blender coordinates. See `doc/scenes.md`. |
 | `src/car-race/` | Car Race: `car-drive` component, car physics (dynamic bicycle model), wall collision and keyboard / thumbstick input. See `doc/scenes.md`. |
 | `src/rig-fixed.ts` | `rig-fixed` component: puts geometry that moves with the rig (the car body) on its own render layer, which the flow meter measures separately. |
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
@@ -46,6 +48,7 @@ head-locked HUD rotation indicators have since been removed.
 | `public/tour-path.json` | `{ duration, points: [{ t, position }] }` — the pre-baked flight path (600 samples over 120 s, `duration` must equal the last `t`), flown as a closed loop with Catmull-Rom interpolation at runtime. |
 | `public/export_tour_path.py` | Blender script: samples a curve object named `TourPath` in a `.blend` file and exports it to `tour-path.json`, converting Blender's Z-up axis convention to A-Frame's Y-up. Run inside Blender's scripting console, not part of the app build. |
 | `public/mountains/` | The glTF landscape flown over. |
+| `public/city/` | City model (`city.glb`, Draco + WebP) and `sky.jpg`, exported from the staircase repo's Blender scene. |
 | `public/car-race/` | Race track and formula car (glTF, CC0) and `track.json` with walls, spawn and car dimensions. |
 | `issues/` | Free-form dev notes/TODOs, not formal issue tracking. |
 
@@ -65,6 +68,8 @@ the rig itself (camera and right controller) and all systems are shared.
 - **`car-drive` component** (Car Race) — drives the car entity from
   keyboard or thumbstick input with a planar car model and wall collision.
   The rig is the seat inside the car.
+- **`straight-drive` component** (City Drive) — moves the same car straight
+  ahead from a start pose with constant acceleration for a fixed time, in a loop.
 - The `<a-camera>` is nested inside the rig with
   `wasd-controls-enabled="false"`. In Mountain Flight the user cannot steer,
   only rotate their view; in Car Race WASD drives the car. In VR mode, WebXR writes the headset's real orientation onto the camera

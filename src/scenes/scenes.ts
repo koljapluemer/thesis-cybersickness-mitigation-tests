@@ -1,8 +1,9 @@
 import { CAR_RACE } from './car-race';
+import { CITY_DRIVE } from './city-drive';
 import { MOUNTAIN_FLIGHT } from './mountain-flight';
 
 /** The test scenes, in select order. */
-export const SCENES = [MOUNTAIN_FLIGHT, CAR_RACE] as const;
+export const SCENES = [MOUNTAIN_FLIGHT, CAR_RACE, CITY_DRIVE] as const;
 
 export type TestScene = (typeof SCENES)[number];
 

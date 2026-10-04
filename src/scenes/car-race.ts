@@ -1,15 +1,11 @@
 import '../car-race/car-drive';
 import type { CarDriveComponent } from '../car-race/car-drive';
-import '../rig-fixed';
-import { rigMarkup } from './rig-markup';
-import { queryEntity, rigModel, worldModel, type SceneDefinition } from './scene-definition';
+import { FORMULA_CAR_ASSET, formulaCarMarkup, formulaCarModel } from './formula-car';
+import { queryEntity, worldModel, type SceneDefinition } from './scene-definition';
 
 const THREE = AFRAME.THREE;
 
 const TRACK_SRC = '/car-race/track.glb';
-const CAR_SRC = '/car-race/car-formula-red.glb';
-/** Driver's eye in the car model: above the windscreen, where the (removed) helmet was. */
-const SEAT_POSITION = '0 1.05 0.1';
 
 type CarRaceFrameState = {
   /** Along the car's forward axis, m/s (negative when reversing). */
@@ -31,21 +27,16 @@ export const CAR_RACE = {
   markup: () => `
     <a-assets>
       <a-asset-item id="race-track" src="${TRACK_SRC}"></a-asset-item>
-      <a-asset-item id="race-car" src="${CAR_SRC}"></a-asset-item>
+      ${FORMULA_CAR_ASSET}
     </a-assets>
 
     <a-entity id="track" gltf-model="#race-track"></a-entity>
 
-    <a-entity id="car" car-drive>
-      <a-entity id="car-body" gltf-model="#race-car" rig-fixed></a-entity>
-      ${rigMarkup(`position="${SEAT_POSITION}"`)}
-    </a-entity>
+    ${formulaCarMarkup('car-drive')}
   `,
 
   recording(sceneEl) {
     const trackEl = queryEntity(sceneEl, '#track');
-    const carBodyEl = queryEntity(sceneEl, '#car-body');
-    const rigEl = queryEntity(sceneEl, '#rig');
     const carDrive = queryEntity(sceneEl, '#car').components['car-drive'] as unknown as CarDriveComponent;
     const toDeg = THREE.MathUtils.radToDeg;
 
@@ -53,7 +44,7 @@ export const CAR_RACE = {
       describe: () => ({
         id: 'car-race',
         staticModels: [worldModel(trackEl, TRACK_SRC)],
-        rigFixedModels: [rigModel(carBodyEl, rigEl, CAR_SRC)],
+        rigFixedModels: [formulaCarModel(sceneEl)],
         motion: { component: 'car-drive', config: { ...carDrive.data, spawn: carDrive.spawn } },
       }),
       frameState: () => {
