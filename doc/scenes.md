@@ -270,6 +270,20 @@ coordinates (m, y up; the room's floor is at y = 0).
 
 A rejected edit is logged as an error and the previous loop kept.
 
+### Ambient sound
+
+Looped sounds play as HRTF point sources (`ambient-sound`,
+`src/audio/ambient-sound.ts`), placed in `AMBIENT_SOUNDS` in
+`src/scenes/big-room.ts`: the fridge hum (`public/refrigerator-sound-effect.mp3`)
+at the fridge's base, bird song (`public/morning-birds-singing.mp3`) outside
+the window front, a construction site
+(`public/exterior-of-construction-site-with-some-background-noises.mp3`)
+outside the wall opposite the bike, and ventilation
+(`public/restaurant-kitchen-ventilation-noise.mp3`) above the big book shelf.
+The glTF nodes are unnamed; objects are found by their materials (`Frridge`,
+`Finestre`, `Bici`, `ScaffaleLibri`). They start on the shared `audio`
+context's unlock and play in every condition.
+
 ## Mountain Flight
 
 `tour-flight` (`src/tour-flight.ts`) flies the rig along
