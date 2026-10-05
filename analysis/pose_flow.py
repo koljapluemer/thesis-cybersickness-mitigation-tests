@@ -99,8 +99,11 @@ def analyse(log: dict, out: Path) -> dict:
     plot_kinematics(log, kinematics, out / "kinematics.png")
 
     columns = kinematics | flow_measures(frames) | {"absHeadYaw": np.abs(kinematics["headYaw"])}
-    rate_hz = 1000 / np.median([frame["deltaMs"] for frame in frames])
-    series = resample(np.array([frame["timeMs"] / 1000 for frame in frames]), columns, rate_hz)
+    # A zero-delta frame repeats its predecessor's scene time and poses: it has no rate, but is no gap either.
+    timed = np.array([frame["deltaMs"] > 0 for frame in frames])
+    columns = {name: column[timed] for name, column in columns.items()}
+    rate_hz = 1000 / np.median([frame["deltaMs"] for frame in frames if frame["deltaMs"] > 0])
+    series = resample(np.array([frame["timeMs"] / 1000 for frame in frames])[timed], columns, rate_hz)
 
     results = {}
     for pair in PAIRS:

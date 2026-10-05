@@ -9,7 +9,8 @@ see doc/pose-flow-agreement.md for the methods and how to read them:
 - agreement (same units only): Lin's concordance correlation, Bland-Altman bias
   and limits of agreement, calibration line
 - serial dependence: Bartlett effective sample size for the correlation's
-  p-value, moving block bootstrap for all confidence intervals
+  p-value, circular block bootstrap within segments for all confidence
+  intervals (none when the session holds too few blocks)
 - frequency: magnitude-squared coherence
 - time: rolling correlation
 - residual regression (same units only): which covariates explain y - x
@@ -31,6 +32,8 @@ COHERENCE_WINDOW_SEC = 8.0
 COHERENCE_BANDS_HZ = ((0.0, 0.2), (0.2, 1.0), (1.0, 5.0))
 ROLLING_WINDOW_SEC = 5.0
 BOOTSTRAP_REPLICATES = 1000
+# Fewer independent blocks than this give no usable confidence intervals.
+MIN_BOOTSTRAP_BLOCKS = 10
 CONFIDENCE = 0.95
 # Spread below which a signal counts as constant (pose round-off is ~1e-14).
 NEGLIGIBLE_SPREAD = 1e-6
@@ -130,13 +133,22 @@ def decorrelation_lag(acf: np.ndarray) -> int:
 
 
 def block_bootstrap(segment: np.ndarray, block: int, replicates: int, rng: np.random.Generator) -> list[np.ndarray]:
-    """Moving block bootstrap index sets; blocks never straddle a segment boundary."""
+    """Circular block bootstrap index sets within segments.
+
+    A block starts at any sample and wraps around within its own segment, so every
+    segment contributes in proportion to its length, also one shorter than a block.
+    """
     n = len(segment)
-    block = int(min(block, np.bincount(segment).max()))
-    starts = np.flatnonzero(segment[: n - block + 1] == segment[block - 1 :])
+    first = np.r_[0, np.flatnonzero(np.diff(segment)) + 1][segment]
+    length = np.bincount(segment)[segment]
     count = -(-n // block)
     offsets = np.arange(block)
-    return [(rng.choice(starts, count)[:, None] + offsets).ravel()[:n] for _ in range(replicates)]
+
+    def replicate() -> np.ndarray:
+        starts = rng.integers(0, n, count)[:, None]
+        return (first[starts] + (starts - first[starts] + offsets) % length[starts]).ravel()[:n]
+
+    return [replicate() for _ in range(replicates)]
 
 
 def point_statistics(x: np.ndarray, y: np.ndarray, same_units: bool) -> dict[str, float]:
@@ -215,7 +227,10 @@ def rolling_correlation(x, y, segment, window: int) -> np.ndarray:
     return out
 
 
-def interval(samples: np.ndarray) -> list[float]:
+def interval(samples: list) -> list[float] | None:
+    """Percentile interval of bootstrap replicates; None without replicates."""
+    if not samples:
+        return None
     tail = (1 - CONFIDENCE) / 2 * 100
     return [float(v) for v in np.nanpercentile(samples, [tail, 100 - tail])]
 
@@ -241,9 +256,11 @@ def compare(series: Series, pair: Pair, seed: int = 0) -> dict:
     names, design = residual_design(x, {name: series.values[name] for name in pair.covariates})
     residual = residual_regression(x, y, design) if pair.same_units else None
 
+    blocks = len(x) / block
     rng = np.random.default_rng(seed)
+    replicates = BOOTSTRAP_REPLICATES if blocks >= MIN_BOOTSTRAP_BLOCKS else 0
     boot_point, boot_coefficients, boot_r2 = [], [], []
-    for index in block_bootstrap(segment, block, BOOTSTRAP_REPLICATES, rng):
+    for index in block_bootstrap(segment, block, replicates, rng):
         boot_point.append(point_statistics(x[index], y[index], pair.same_units))
         if residual is not None:
             coefficients, r2 = residual_regression(x[index], y[index], design[index])
@@ -262,9 +279,10 @@ def compare(series: Series, pair: Pair, seed: int = 0) -> dict:
         "ccfPeakAtSearchLimit": bool(abs(peak_lag) == lags[-1]),
         "effectiveSampleSize": n_eff,
         "bootstrapBlockSec": block / series.rate_hz,
-        "bootstrapBlocksPerSession": len(x) / block,
+        "bootstrapBlocksPerSession": blocks,
+        "confidenceIntervals": replicates > 0,
         "pearsonPValue": float(2 * stats.t.sf(abs(t_value), n_eff - 2)),
-        "statistics": {key: {"value": value, "ci95": interval(np.array([b[key] for b in boot_point]))} for key, value in point.items()},
+        "statistics": {key: {"value": value, "ci95": interval([b[key] for b in boot_point])} for key, value in point.items()},
     }
     frequency, coherence_values = coherence(x, y, segment, series.rate_hz)
     result["coherenceBands"] = [
@@ -273,12 +291,11 @@ def compare(series: Series, pair: Pair, seed: int = 0) -> dict:
     ]
     if residual is not None:
         coefficients, r2 = residual
-        boot_coefficients = np.array(boot_coefficients)
         result["residualRegression"] = {
             "target": "measure - reference",
-            "rSquared": {"value": r2, "ci95": interval(np.array(boot_r2))},
+            "rSquared": {"value": r2, "ci95": interval(boot_r2)},
             "coefficients": {
-                name: {"value": float(value), "ci95": interval(boot_coefficients[:, index])}
+                name: {"value": float(value), "ci95": interval([b[index] for b in boot_coefficients])}
                 for index, (name, value) in enumerate(zip(names, coefficients))
             },
         }
@@ -300,6 +317,13 @@ def with_gaps(t: np.ndarray, segment: np.ndarray, values: np.ndarray) -> tuple[n
     """Insert NaN between segments so line plots do not bridge them."""
     breaks = np.flatnonzero(np.diff(segment)) + 1
     return np.insert(t.astype(float), breaks, np.nan), np.insert(values.astype(float), breaks, np.nan)
+
+
+def plot_estimate(axis, estimate: dict, position: float, color: str, label: str | None = None) -> None:
+    """Point with its CI as a horizontal bar; a percentile CI need not contain the point."""
+    if estimate["ci95"] is not None:
+        axis.hlines(position, *estimate["ci95"], color=color, linewidth=1.5)
+    axis.plot(estimate["value"], position, "o", color=color, label=label)
 
 
 def plot_pair(pair: Pair, result: dict, path) -> None:
@@ -340,7 +364,8 @@ def plot_pair(pair: Pair, result: dict, path) -> None:
         axis.scatter((x + y) / 2, y - x, s=2, alpha=0.2)
         for key, style in (("bias", "-"), ("limitsOfAgreementLow", "--"), ("limitsOfAgreementHigh", "--")):
             axis.axhline(statistics[key]["value"], color="C3", linestyle=style, linewidth=0.9)
-            axis.axhspan(*statistics[key]["ci95"], color="C3", alpha=0.12)
+            if statistics[key]["ci95"] is not None:
+                axis.axhspan(*statistics[key]["ci95"], color="C3", alpha=0.12)
         axis.set_xlabel(f"mean of both ({pair.unit})")
         axis.set_ylabel(f"measure − reference ({pair.unit})")
         axis.set_title(
@@ -381,10 +406,9 @@ def plot_pair(pair: Pair, result: dict, path) -> None:
     if "residualRegression" in result:
         regression = result["residualRegression"]
         terms = [name for name in regression["coefficients"] if name != "intercept"]
-        values = np.array([regression["coefficients"][name]["value"] for name in terms])
-        bounds = np.array([regression["coefficients"][name]["ci95"] for name in terms])
         positions = np.arange(len(terms))
-        axis.errorbar(values, positions, xerr=[values - bounds[:, 0], bounds[:, 1] - values], fmt="o", capsize=3)
+        for position, name in zip(positions, terms):
+            plot_estimate(axis, regression["coefficients"][name], position, "C0")
         axis.axvline(0, color="black", linewidth=0.4)
         axis.set_yticks(positions, terms, fontsize=8)
         axis.invert_yaxis()
@@ -408,21 +432,12 @@ def plot_summary(pairs: list[Pair], results: dict[str, dict], path) -> None:
         for offset, (key, label) in enumerate(keys):
             if key not in statistics:
                 continue
-            value, (low, high) = statistics[key]["value"], statistics[key]["ci95"]
-            axis.errorbar(
-                value,
-                row + (offset - 1) * 0.22,
-                xerr=[[value - low], [high - value]],
-                fmt="o",
-                color=f"C{offset}",
-                capsize=3,
-                label=label if row == 0 else None,
-            )
+            plot_estimate(axis, statistics[key], row + (offset - 1) * 0.22, f"C{offset}", label if row == 0 else None)
     axis.set_yticks(range(len(shown)), [f"{pair.y_label}\nvs. {pair.x_label}" for pair in shown], fontsize=8)
     axis.invert_yaxis()
     axis.axvline(0, color="black", linewidth=0.4)
     axis.axvline(1, color="grey", linewidth=0.4, linestyle=":")
-    axis.set_xlabel(f"value with {CONFIDENCE:.0%} block-bootstrap CI")
+    axis.set_xlabel(f"value with {CONFIDENCE:.0%} block-bootstrap CI (none below {MIN_BOOTSTRAP_BLOCKS} blocks)")
     figure.legend(loc="upper center", ncol=len(keys), fontsize=8)
     figure.tight_layout(rect=(0, 0, 1, 0.93))
     figure.savefig(path, dpi=110)

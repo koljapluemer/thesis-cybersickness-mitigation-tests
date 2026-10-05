@@ -25,7 +25,11 @@ the first view stands for the head.
 Rates are taken between consecutive frames over the frame's `deltaMs`. This is
 the same discretisation as the optical flow, so both describe exactly the same
 interval. A frame with no directly preceding frame, or one the rig teleported
-into (`rig-teleport` event, e.g. a car reset), gets NaN.
+into (`rig-teleport` event, e.g. a car reset), gets NaN. So does a frame with
+`deltaMs` 0, which browsers with coarse timers (desktop Firefox: 1 ms) produce
+at high frame rates. It repeats its predecessor's scene time and poses, so the
+motion continues across it: the next frame's rates and acceleration are taken
+as if it were not there.
 
 Signs: yaw positive = **left** (counter-clockwise seen from above), pitch
 positive = **up**. A leftward turn moves the image rightward, which is positive
@@ -72,7 +76,8 @@ depth-dependent lateral flow. So the slope is not expected to be exactly 1.
 
 Frame times are irregular. Every signal is linearly interpolated onto a uniform
 grid at the median frame rate, within contiguous runs of frames where all
-signals are present. A NaN in any signal splits the recording, for example an
+signals are present. Zero-delta frames are left out (they have no rates, but
+are no gap either). Any other NaN splits the recording, for example an
 unmeasured frame after entering or leaving VR. Runs shorter than 2 s are
 dropped. All statistics respect these segments: lagged pairs, bootstrap blocks
 and rolling windows never cross a segment boundary.
@@ -110,13 +115,18 @@ synchronous by construction.
   observations. N_eff = N / (1 + 2 Σₖ ρₓ(k) ρᵧ(k)), summed until the product
   of the two autocorrelations first drops to 0. `pearsonPValue` uses a t-test
   with N_eff − 2 degrees of freedom.
-- **Moving block bootstrap.** Gives the 95% CIs of every statistic, with 1000
-  replicates.
+- **Circular block bootstrap.** Gives the 95% CIs of every statistic, with
+  1000 replicates. A block starts at any sample and wraps around within its
+  own segment, so every segment contributes in proportion to its length, also
+  one shorter than a block.
   - Blocks are as long as the slower of the two signals takes to decorrelate
     (autocorrelation < 1/e, `bootstrapBlockSec`), so resampled data keeps the
     serial dependence.
   - `bootstrapBlocksPerSession` says how many independent blocks the session
-    contains. Below about 10, the CIs are unreliable.
+    contains. Below 10, the CIs are unreliable, so none are computed
+    (`confidenceIntervals` false, every `ci95` null).
+  - Percentile intervals need not contain the point estimate; the plots draw
+    them as bars, not as error bars around the point.
 - **Magnitude-squared coherence.** Welch, 8 s windows, spectra pooled over
   segments. It measures agreement per frequency on a scale of 0–1.
   `coherenceBands` holds band means for < 0.2 Hz (slow turns), 0.2–1 Hz and

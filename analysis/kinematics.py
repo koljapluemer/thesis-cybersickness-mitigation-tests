@@ -48,17 +48,23 @@ def wrap_deg(angle: float) -> float:
 
 
 def pose_kinematics(frames: list[dict], teleports: set[int]) -> dict[str, np.ndarray]:
-    """Per-frame kinematic measures, NaN where a rate has no directly preceding frame or spans a teleport."""
+    """Per-frame kinematic measures, NaN where a rate has no directly preceding frame, spans a teleport or zero time."""
     n = len(frames)
     out = {name: np.full(n, np.nan) for name in MEASURES}
     rig = [mat4(frame["rigMatrixWorld"]) for frame in frames]
     # Both eyes share the head's orientation, so the first view stands for the head.
     head = [r[:3, :3].T @ mat4(frame["views"][0]["matrixWorld"])[:3, :3] for r, frame in zip(rig, frames)]
-    velocity = np.full((n, 3), np.nan)
+    # Velocity and deltaMs of the latest frame with a rate, while the motion is continuous.
+    previous: tuple[np.ndarray, float] | None = None
 
     for i, frame in enumerate(frames):
         out["headYaw"][i], out["headPitch"][i] = heading_and_pitch(head[i])
         if i == 0 or frames[i - 1]["frame"] != frame["frame"] - 1 or frame["frame"] in teleports:
+            previous = None
+            continue
+        # Same rule as the recorder's `measurable`: a zero-delta frame repeats the previous pose and has no
+        # rate, but the motion continues across it.
+        if frame["deltaMs"] <= 0:
             continue
         dt = frame["deltaMs"] / 1000
         rig_yaw, rig_pitch = heading_and_pitch(rig[i][:3, :3])
@@ -66,14 +72,15 @@ def pose_kinematics(frames: list[dict], teleports: set[int]) -> dict[str, np.nda
         out["rigYawRate"][i] = wrap_deg(rig_yaw - prev_rig_yaw) / dt
         out["rigPitchRate"][i] = (rig_pitch - prev_rig_pitch) / dt
         out["rigAngularSpeed"][i] = rotation_angle_deg(rig[i - 1][:3, :3].T @ rig[i][:3, :3]) / dt
-        velocity[i] = (rig[i][:3, 3] - rig[i - 1][:3, 3]) / dt
-        out["rigSpeed"][i] = np.linalg.norm(velocity[i])
+        velocity = (rig[i][:3, 3] - rig[i - 1][:3, 3]) / dt
+        out["rigSpeed"][i] = np.linalg.norm(velocity)
         out["headYawRate"][i] = wrap_deg(out["headYaw"][i] - out["headYaw"][i - 1]) / dt
         out["headAngularSpeed"][i] = rotation_angle_deg(head[i - 1].T @ head[i]) / dt
-        if np.isfinite(velocity[i - 1, 0]):
+        if previous is not None:
             # Velocities are means over their frame intervals, whose centres are half of both intervals apart.
-            spacing = (frame["deltaMs"] + frames[i - 1]["deltaMs"]) / 2000
-            out["rigAcceleration"][i] = np.linalg.norm(velocity[i] - velocity[i - 1]) / spacing
+            spacing = (frame["deltaMs"] + previous[1]) / 2000
+            out["rigAcceleration"][i] = np.linalg.norm(velocity - previous[0]) / spacing
+        previous = velocity, frame["deltaMs"]
 
     return out
 
