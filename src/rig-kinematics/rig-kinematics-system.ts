@@ -142,6 +142,19 @@ AFRAME.registerSystem('rig-kinematics', {
   },
 });
 
+/** Frames longer than this (tab switch, XR session start) re-align integrated models with the rig instead of integrating. */
+const MAX_INTEGRATION_STEP_MS = 100;
+
+/**
+ * Whether a model driven by these samples (`InertialSphere`, `InertialMass`)
+ * may integrate over this one: `aligned` means it has already been reset to
+ * the rig once. Otherwise it should snap to the rig: on its first sample,
+ * after a restart (start, paused frame, rig teleport) and after a long frame.
+ */
+export function isIntegrable(sample: RigKinematicsSample, aligned: boolean): boolean {
+  return aligned && !sample.restarted && sample.frameDeltaMs <= MAX_INTEGRATION_STEP_MS;
+}
+
 export function getRigKinematics(sceneEl: Element): RigKinematicsSystem {
   return (sceneEl as unknown as { systems: Record<string, unknown> }).systems['rig-kinematics'] as RigKinematicsSystem;
 }

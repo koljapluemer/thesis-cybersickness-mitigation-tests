@@ -4,16 +4,13 @@ import type { Quaternion, Vector3 } from 'three';
 import { getAudio } from '../audio/audio-system';
 import type { Unsubscribe } from '../optical-flow/types';
 import { headMatrixWorld } from '../rig';
-import { getRigKinematics, type RigKinematicsSample } from '../rig-kinematics/rig-kinematics-system';
+import { getRigKinematics, isIntegrable, type RigKinematicsSample } from '../rig-kinematics/rig-kinematics-system';
 import { fromRotationVector } from '../rotation';
 import { InertialMass } from './inertial-mass';
 import { InertialSphere } from './inertial-sphere';
 import { MotorSound, REFERENCE_DISTANCE_M } from './motor-sound';
 
 const THREE = AFRAME.THREE;
-
-/** Frames longer than this (tab switch, XR session start) re-align the sphere with the rig instead of integrating. */
-const MAX_STEP_MS = 100;
 
 /**
  * Which rig motion deflects the source: `rotation` turns it with the lag of an
@@ -191,7 +188,7 @@ AFRAME.registerSystem('inertial-sound', {
     rigAngularVelocity.fromArray(sample.angularVelocityRadPerSec);
     rigPosition.fromArray(sample.rigPositionM);
     rigVelocity.fromArray(sample.linearVelocityMps);
-    const integrate = aligned && !sample.restarted && sample.frameDeltaMs <= MAX_STEP_MS;
+    const integrate = isIntegrable(sample, aligned);
     const dtSec = sample.frameDeltaMs / 1000;
     let lagFraction: number;
 

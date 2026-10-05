@@ -1,8 +1,10 @@
 import 'aframe';
 import type { Scene } from 'aframe';
 import './style.css';
+import { getAmbientSound } from './audio/ambient-sound';
 import { getOpticalFlow } from './optical-flow/optical-flow-system';
 import { getTurnCues } from './turn-cues/turn-cue-system';
+import { getInertialAmbience } from './inertial-ambience/inertial-ambience-system';
 import { getInertialSound } from './inertial-sound/inertial-sound-system';
 import { getCondition } from './conditions/condition-system';
 import { mountConditionSelect } from './conditions/condition-select';
@@ -54,6 +56,8 @@ sceneEl.addEventListener('loaded', () => {
     getOpticalFlow(sceneEl),
     getTurnCues(sceneEl),
     getInertialSound(sceneEl),
+    getInertialAmbience(sceneEl),
+    getAmbientSound(sceneEl),
     conditions,
     { fieldSnapshotIntervalMs: 500, scene: testScene.recording(sceneEl) },
   );

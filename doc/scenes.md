@@ -282,7 +282,11 @@ outside the wall opposite the bike, and ventilation
 (`public/restaurant-kitchen-ventilation-noise.mp3`) above the big book shelf.
 The glTF nodes are unnamed; objects are found by their materials (`Frridge`,
 `Finestre`, `Bici`, `ScaffaleLibri`). They start on the shared `audio`
-context's unlock and play in every condition.
+context's unlock and play in every condition. The `ambient-sound` system places
+them every frame in head coordinates. Under the `inertial-ambience-*`
+conditions it turns them about the head by the inertial sphere's lag
+(`inertial-ambience.md`). The log describes them in `ambientSounds` and records
+where each one is and is heard in `ambientSoundSamples`.
 
 ## Mountain Flight
 

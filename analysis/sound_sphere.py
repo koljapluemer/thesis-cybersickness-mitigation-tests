@@ -102,11 +102,11 @@ def draw_top_view(axis: plt.Axes, max_offset_m: float) -> None:
     axis.set_title("offset from rest, seen from above", fontsize=10)
 
 
-def trail_segments(points: np.ndarray, first: int, last: int) -> tuple[np.ndarray, np.ndarray]:
+def trail_segments(points: np.ndarray, first: int, last: int, colour: str = SOURCE_COLOUR) -> tuple[np.ndarray, np.ndarray]:
     """Segments of the trail from sample `first` to `last`, and their colours fading in towards `last`."""
     trail = points[first : last + 1]
     segments = np.stack([trail[:-1], trail[1:]], axis=1)
-    colours = np.tile(to_rgba(SOURCE_COLOUR), (len(segments), 1))
+    colours = np.tile(to_rgba(colour), (len(segments), 1))
     colours[:, 3] = np.linspace(0, 1, len(segments) + 1)[1:] if len(segments) else []
     return segments, colours
 

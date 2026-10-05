@@ -57,7 +57,10 @@ return of a few seconds needs amplification: `naturalPeriodMs` and
   `maxLagDeg / lagGain`).
 - On the first sample, after a frame longer than 100 ms (tab switch, XR
   session start), and after a rig teleport (`restarted` samples, see
-  `scenes.md`), the sphere snaps to the rig instead of integrating.
+  `scenes.md`), the sphere snaps to the rig instead of integrating
+  (`isIntegrable` in `rig-kinematics-system.ts`).
+- The same sphere drives the inertial ambience (`inertial-ambience.md`), which
+  turns the scene's ambient sounds instead of a motor sound.
 - In Mountain Flight the rig is pitched 30° down, so a rotation about world up appears in the rig
   frame split into a yaw (y, cos 30°) and a roll (z, sin 30°) component. Pitch
   changes of the flight path show up as x.

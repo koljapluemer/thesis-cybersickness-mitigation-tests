@@ -12,7 +12,8 @@ Usage:
 Without a log argument, the latest `optical-flow-*.json` in the repository's `log/` is used.
 
 Outputs in DIR (default: next to the log, `<log name>-replay/`):
-    timeseries.png   live flow measurements, turn signal and turn cues, and the inertial sound's lag over the session
+    timeseries.png   live flow measurements, turn signal and turn cues, the inertial sound's lag and the
+                     inertial ambience's lag over the session
     frames/*.png     per replayed view: reconstruction | live flow | recomputed flow | |difference|
                      (total flow)
                      (live panels are blank on frames without a live field snapshot)
@@ -184,17 +185,23 @@ def to_eye(view: np.ndarray, points: np.ndarray) -> np.ndarray:
     return points @ view[:3, :3].T + view[:3, 3]
 
 
-def replay_view(scene: SceneGeometry, frame: dict, previous: dict, view_index: int, width: int, height: int):
-    """Returns ({component: flow field [h, w, 4] in the live layout}, colour image [h, w, 3])."""
-    view = frame["views"][view_index]
-    eye_world = mat4(view["matrixWorld"])
-    projection = mat4(view["projectionMatrix"])
-    prev_eye_world = mat4(previous["views"][view_index]["matrixWorld"])
-    rig = mat4(frame["rigMatrixWorld"])
-    prev_rig = mat4(previous["rigMatrixWorld"])
-    rig_motion = prev_rig @ np.linalg.inv(rig)  # current -> previous pose of anything fixed to the rig
-    rig_prev_eye_world = rig_motion @ eye_world
+@dataclass
+class ViewCast:
+    """Nearest surface per pixel of one view, from both models."""
 
+    origins: np.ndarray  # [n, 3] world
+    static_hits: np.ndarray  # [n, 3] world, NaN without hit
+    static_triangles: np.ndarray  # [n], -1 without hit
+    rig_hits: np.ndarray  # [n, 3] rig coordinates
+    rig_triangles: np.ndarray
+    on_rig: np.ndarray  # [n] bool: the nearest hit is rig-fixed
+    on_static: np.ndarray  # [n] bool: the nearest hit is static
+    ray_index: np.ndarray  # pixels with any hit
+    locations: np.ndarray  # [len(ray_index), 3] world: the nearest hit of those pixels
+
+
+def cast_view(scene: SceneGeometry, eye_world: np.ndarray, projection: np.ndarray, rig: np.ndarray, width: int, height: int) -> ViewCast:
+    """Casts one ray per pixel (rows bottom-up, WebGL order) from the eye pose into both models."""
     count = width * height
     directions = pixel_directions(width, height, projection) @ eye_world[:3, :3].T
     origins = np.repeat(eye_world[:3, 3][None], count, axis=0)
@@ -210,11 +217,49 @@ def replay_view(scene: SceneGeometry, frame: dict, previous: dict, view_index: i
     on_static = ~on_rig & np.isfinite(static_distance)
     ray_index = np.flatnonzero(on_rig | on_static)
     locations = np.where(on_rig[:, None], rig_hits_world, static_hits)[ray_index]
+    return ViewCast(origins, static_hits, static_triangles, rig_hits, rig_triangles, on_rig, on_static, ray_index, locations)
+
+
+def shade_view(scene: SceneGeometry, view: ViewCast, rig: np.ndarray) -> np.ndarray:
+    """Base colour with simple Lambert shading, only for orientation: [n, 3], sky colour without hit."""
+    colour = np.tile(np.array([0.86, 0.93, 0.97], dtype=np.float32), (len(view.origins), 1))
+    light = np.array([6, 10, 3], dtype=np.float64)
+    light /= np.linalg.norm(light)
+    for model, hits, triangles, mask, to_world in (
+        (scene.static, view.static_hits, view.static_triangles, view.on_static, np.eye(3)),
+        (scene.rig_fixed, view.rig_hits, view.rig_triangles, view.on_rig, rig[:3, :3]),
+    ):
+        if not mask.any():
+            continue
+        normals = model.mesh.face_normals[triangles[mask]] @ to_world.T
+        shade = 0.55 + 0.45 * np.abs(normals @ light)
+        colour[mask] = surface_colour(model, hits[mask], triangles[mask]) * shade[:, None]
+    return colour
+
+
+def render_view(scene: SceneGeometry, eye_world: np.ndarray, projection: np.ndarray, rig: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Colour image [h, w, 3] of the scene from the eye pose, rows bottom-up (see `upscale`)."""
+    return shade_view(scene, cast_view(scene, eye_world, projection, rig, width, height), rig).reshape(height, width, 3)
+
+
+def replay_view(scene: SceneGeometry, frame: dict, previous: dict, view_index: int, width: int, height: int):
+    """Returns ({component: flow field [h, w, 4] in the live layout}, colour image [h, w, 3])."""
+    view = frame["views"][view_index]
+    eye_world = mat4(view["matrixWorld"])
+    projection = mat4(view["projectionMatrix"])
+    prev_eye_world = mat4(previous["views"][view_index]["matrixWorld"])
+    rig = mat4(frame["rigMatrixWorld"])
+    prev_rig = mat4(previous["rigMatrixWorld"])
+    rig_motion = prev_rig @ np.linalg.inv(rig)  # current -> previous pose of anything fixed to the rig
+    rig_prev_eye_world = rig_motion @ eye_world
+
+    hits = cast_view(scene, eye_world, projection, rig, width, height)
+    count = width * height
+    ray_index, locations = hits.ray_index, hits.locations
     # Where each surface point was in the previous frame: static points stay, rig-fixed ones moved with the rig.
-    previous_locations = np.where(on_rig[ray_index, None], to_eye(rig_motion, locations), locations)
+    previous_locations = np.where(hits.on_rig[ray_index, None], to_eye(rig_motion, locations), locations)
 
     fields = {component: np.tile(np.array([0, 0, -1, 0], dtype=np.float32), (count, 1)) for component in COMPONENTS}
-    colour = np.tile(np.array([0.86, 0.93, 0.97], dtype=np.float32), (count, 1))
 
     if len(locations):
         inv_dt = 1000.0 / frame["deltaMs"]
@@ -235,19 +280,7 @@ def replay_view(scene: SceneGeometry, frame: dict, previous: dict, view_index: i
             field[ray_index, 2] = angle_deg(unit(previous_points), unit(current)) * inv_dt
             field[ray_index, 3] = azimuth_change_deg(previous_points, current) * inv_dt
 
-        # Base colour with simple Lambert shading, only for orientation.
-        light = np.array([6, 10, 3], dtype=np.float64)
-        light /= np.linalg.norm(light)
-        for model, hits, triangles, mask, to_world in (
-            (scene.static, static_hits, static_triangles, on_static, np.eye(3)),
-            (scene.rig_fixed, rig_hits, rig_triangles, on_rig, rig[:3, :3]),
-        ):
-            if not mask.any():
-                continue
-            normals = model.mesh.face_normals[triangles[mask]] @ to_world.T
-            shade = 0.55 + 0.45 * np.abs(normals @ light)
-            colour[mask] = surface_colour(model, hits[mask], triangles[mask]) * shade[:, None]
-
+    colour = shade_view(scene, hits, rig)
     return {component: field.reshape(height, width, 4) for component, field in fields.items()}, colour.reshape(height, width, 3)
 
 
@@ -312,7 +345,7 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frames = [frame for frame in log["frames"] if frame["flow"] is not None]
     t = np.array([frame["timeMs"] / 1000 for frame in frames])
     combined = [frame["flow"]["combined"] for frame in frames]
-    figure, axes = plt.subplots(5, 1, figsize=(12, 15), sharex=True)
+    figure, axes = plt.subplots(6, 1, figsize=(12, 18), sharex=True)
 
     axes[0].plot(t, [c["total"]["meanDegPerSec"] for c in combined], label="total mean")
     axes[0].plot(t, [c["rigInduced"]["meanDegPerSec"] for c in combined], label="rig-induced mean", linestyle="--")
@@ -333,7 +366,8 @@ def plot_timeseries(log: dict, path: Path) -> None:
     frame_time_axis.set_ylabel("frame time (ms)", color="C1")
     plot_turn_signal(log, axes[3])
     plot_inertial_sound(log, axes[4])
-    axes[4].set_xlabel("session time (s)")
+    plot_inertial_ambience(log, axes[5])
+    axes[5].set_xlabel("session time (s)")
 
     for event in log["events"]:
         if event["type"] == "turn-cue":
@@ -405,6 +439,22 @@ def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
             axis.plot(t, lag[:, index], label=f"lag {name}")
         # Azimuth in the head frame (x right, -z forward), positive = left.
         axis.plot(t, np.degrees(np.arctan2(-position[:, 0], -position[:, 2])), color="grey", alpha=0.6, label="source azimuth (head, +left)")
+    axis.legend(loc="upper right")
+
+
+def plot_inertial_ambience(log: dict, axis: plt.Axes) -> None:
+    """Rotation of the ambient sources about the head (sphere lag × lagGain, signed by `swing`; rig frame, +left, deg)."""
+    config = log["inertialAmbience"]
+    samples = log["inertialAmbienceSamples"]
+    timing = f"T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}"
+    axis.set_ylabel(f"inertial ambience (deg)\n{config['swing']}, {timing}, ×{config['lagGain']:g}")
+    if not samples or not log["frames"]:
+        axis.text(0.5, 0.5, "inertial ambience disabled", transform=axis.transAxes, ha="center", va="center")
+        return
+    t = session_time_sec(log, [sample["sceneTimeMs"] for sample in samples])
+    lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
+    for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):
+        axis.plot(t, lag[:, index], label=f"rotation {name}")
     axis.legend(loc="upper right")
 
 

@@ -33,16 +33,19 @@ head-locked HUD rotation indicators have since been removed.
 | `src/conditions/` | Experimental conditions (`condition` A-Frame system): registry of conditions, each configuring every mitigation system, plus the DOM select and the VR controller cycling to switch them. See `doc/conditions.md`. |
 | `src/rig-kinematics/` | `rig-kinematics` A-Frame system: per-frame rig orientation and angular velocity (world frame), and the yaw rate and angular acceleration about the rig's local up axis. |
 | `src/inertial-sound/` | Inertial motor sound (`inertial-sound` A-Frame system): an HRTF-spatialized, world-anchored motor sound deflected by the rig's acceleration through a spring and damper: on a sphere that follows the rig's rotation (it swings out when the rotation accelerates), or on a point mass below the user that follows the rig's position (it slides against linear acceleration). See `doc/inertial-sound.md`. |
+| `src/inertial-ambience/` | Inertial ambience (`inertial-ambience` A-Frame system): the same inertial sphere, turning the scene's ambient sounds about the head instead of a motor sound. See `doc/inertial-ambience.md`. |
 | `src/rig.ts` | Finds the rig (the camera entity's parent) and the head's world matrix; shared by `optical-flow`, `rig-kinematics` and `inertial-sound`. Also the rig teleport signal (`announceRigTeleport`). |
 | `src/rotation.ts` | Quaternion ↔ rotation vector (log/exp map). |
-| `src/audio/` | `audio` A-Frame system: the scene's shared, gesture-unlocked `AudioContext`. |
+| `src/audio/` | `audio` A-Frame system: the scene's shared, gesture-unlocked `AudioContext`; `ambient-sound` component and system: looped HRTF point sources, placed every frame (turned by `inertial-ambience` when enabled). |
 | `src/recording-button.ts` | Start/stop button for flow recording; stopping downloads the session log as JSON. |
 | `doc/optical-flow.md` | How flow tracking, the live API, the log format and offline validation work. |
 | `doc/turn-cues.md` | Turn cue pipeline, configuration and audio unlock. |
 | `doc/inertial-sound.md` | Inertial sound: model, sound, configuration and logging. |
+| `doc/inertial-ambience.md` | Inertial ambience: placement, the two signs, where to tune it, logging and analysis. |
+| `doc/ambisonic-field-rotation.md` | Idea only, not implemented: rotating an ambisonic sound field instead of the sources. |
 | `doc/conditions.md` | Experimental conditions: architecture, switching, adding conditions and mitigations. |
 | `doc/scenes.md` | Test scenes: selection and URL, architecture, rig teleports and rig-fixed geometry, the Car Race controls, car model and assets, adding a scene. |
-| `analysis/` | uv project; `replay_session.py` replays a session log offline, validates the live flow measurement and compares it with the pose kinematics. |
+| `analysis/` | uv project; `replay_session.py` replays a session log offline, validates the live flow measurement and compares it with the pose kinematics; `sound_sphere.py` and `ambient_sound.py` animate the inertial motor sound and the ambient sources. |
 | `doc/pose-flow-agreement.md` | Rig and head kinematics from the logged poses and the statistics of their agreement with the optical flow. |
 | `src/style.css` | Fullscreen layout reset for the embedded `<a-scene>`. |
 | `index.html` | Entry point, mounts the scene into `#app`, loads a GoatCounter analytics beacon. |
@@ -90,9 +93,13 @@ the rig itself (camera and right controller) and all systems are shared.
   world-anchored and spatialized, that lags behind the rig's rotation or
   slides against its linear acceleration.
   Configured by the selected condition. Details: `doc/inertial-sound.md`.
+- **`inertial-ambience` system** (configured on `<a-scene>`) — turns the Big
+  Room's ambient sounds about the head by the same inertial lag, in one of two
+  senses. Configured by the selected condition. Details: `doc/inertial-ambience.md`.
 - **`condition` system** (`condition="…"` on `<a-scene>`) — the experimental
   condition (No Mitigation, and Turn Tone / Flexible Tone each from Optical Flow
-  or Rig Angular Acceleration, Inertial Motor Sound with constant or revving pitch or from linear acceleration), switchable with the select in the
+  or Rig Angular Acceleration, Inertial Motor Sound with constant or revving pitch or from linear acceleration,
+  Inertial Ambience against or with the acceleration), switchable with the select in the
   bottom-left corner or, in VR, cycled with B on the right controller. Locked
   while recording. Independent of the scene.
   Details: `doc/conditions.md`.

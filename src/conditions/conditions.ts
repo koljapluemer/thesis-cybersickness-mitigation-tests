@@ -1,4 +1,6 @@
 // Registers the mitigation systems configured below.
+import '../inertial-ambience/inertial-ambience-system';
+import type { InertialAmbienceData } from '../inertial-ambience/inertial-ambience-system';
 import '../inertial-sound/inertial-sound-system';
 import type { InertialSoundData } from '../inertial-sound/inertial-sound-system';
 import '../turn-cues/turn-cue-system';
@@ -12,6 +14,7 @@ import type { TurnCueData } from '../turn-cues/turn-cue-system';
 export type MitigationConfigs = {
   'turn-cues': Partial<TurnCueData>;
   'inertial-sound': Partial<InertialSoundData>;
+  'inertial-ambience': Partial<InertialAmbienceData>;
 };
 
 export type Condition = {
@@ -34,6 +37,7 @@ const RIG_ANGULAR_ACCELERATION = {
 } as const satisfies Partial<TurnCueData>;
 
 const NO_INERTIAL_SOUND = { enabled: false } as const satisfies Partial<InertialSoundData>;
+const NO_INERTIAL_AMBIENCE = { enabled: false } as const satisfies Partial<InertialAmbienceData>;
 
 /** The experimental conditions, in select and cycle order. */
 export const CONDITIONS = [
@@ -41,17 +45,17 @@ export const CONDITIONS = [
     id: 'no-mitigation',
     label: 'No Mitigation',
     // Cues are still detected and logged, just not played: the silent control.
-    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': NO_INERTIAL_SOUND },
+    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': NO_INERTIAL_SOUND, 'inertial-ambience': NO_INERTIAL_AMBIENCE },
   },
   {
     id: 'turn-tone-optical-flow',
     label: 'Turn Tone (Optical Flow)',
-    mitigations: { 'turn-cues': { output: 'stereo-tone' }, 'inertial-sound': NO_INERTIAL_SOUND },
+    mitigations: { 'turn-cues': { output: 'stereo-tone' }, 'inertial-sound': NO_INERTIAL_SOUND, 'inertial-ambience': NO_INERTIAL_AMBIENCE },
   },
   {
     id: 'flexible-tone-optical-flow',
     label: 'Flexible Tone (Optical Flow)',
-    mitigations: { 'turn-cues': { output: 'flexible-tone' }, 'inertial-sound': NO_INERTIAL_SOUND },
+    mitigations: { 'turn-cues': { output: 'flexible-tone' }, 'inertial-sound': NO_INERTIAL_SOUND, 'inertial-ambience': NO_INERTIAL_AMBIENCE },
   },
   {
     id: 'turn-tone-rig-acceleration',
@@ -59,6 +63,7 @@ export const CONDITIONS = [
     mitigations: {
       'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'stereo-tone' },
       'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': NO_INERTIAL_AMBIENCE,
     },
   },
   {
@@ -67,18 +72,27 @@ export const CONDITIONS = [
     mitigations: {
       'turn-cues': { ...RIG_ANGULAR_ACCELERATION, output: 'flexible-tone' },
       'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': NO_INERTIAL_AMBIENCE,
     },
   },
   // Inertial sound conditions: turn cues are detected and logged as in the control, not played.
   {
     id: 'inertial-motor-sound-constant',
     label: 'Inertial Motor Sound (Constant Pitch)',
-    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: false, lagGain: 7 } },
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': { enabled: true, revWithLag: false, lagGain: 7 },
+      'inertial-ambience': NO_INERTIAL_AMBIENCE,
+    },
   },
   {
     id: 'inertial-motor-sound-revving',
     label: 'Inertial Motor Sound (Revving Pitch)',
-    mitigations: { 'turn-cues': { output: 'none' }, 'inertial-sound': { enabled: true, revWithLag: true } },
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': { enabled: true, revWithLag: true },
+      'inertial-ambience': NO_INERTIAL_AMBIENCE,
+    },
   },
   {
     id: 'inertial-motor-sound-linear',
@@ -87,6 +101,30 @@ export const CONDITIONS = [
       'turn-cues': { output: 'none' },
       // Straight below the listener (rig frame), shifted by the rig's linear acceleration only. Untuned.
       'inertial-sound': { enabled: true, motion: 'translation', elevationDeg: -90, naturalPeriodMs: 2000 },
+      'inertial-ambience': NO_INERTIAL_AMBIENCE,
+    },
+  },
+  // Inertial ambience conditions: the scene's own ambient sounds swing with the
+  // inertial sphere's lag (doc/inertial-ambience.md). Only the Big Room has
+  // ambient sounds; elsewhere these play nothing. Tune the swing here, per
+  // condition, e.g. `lagGain: 3, maxLagDeg: 60, naturalPeriodMs: 6000`; the
+  // defaults are in the schema of `src/inertial-ambience/inertial-ambience-system.ts`.
+  {
+    id: 'inertial-ambience-against-acceleration',
+    label: 'Inertial Ambience (Against Acceleration)',
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': { enabled: true, swing: 'against-acceleration' },
+    },
+  },
+  {
+    id: 'inertial-ambience-with-acceleration',
+    label: 'Inertial Ambience (With Acceleration)',
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': { enabled: true, swing: 'with-acceleration' },
     },
   },
 ] as const satisfies readonly Condition[];

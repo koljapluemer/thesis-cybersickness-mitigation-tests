@@ -129,7 +129,7 @@ been profiled on a device yet.
 The button in the top-left corner starts and stops recording
 (`src/recording-button.ts`). Stopping waits for pending measurements and then
 downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
-(`SessionLog`, format version 9):
+(`SessionLog`, format version 10):
 
 - `flowMeter`: field height, band limits, channel names, snapshot interval.
 - `condition`: the experimental condition id (see `conditions.md`). It is
@@ -137,6 +137,9 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
 - `turnCues`: the effective `turn-cues` configuration under that condition.
 - `inertialSound`: the effective `inertial-sound` configuration under that
   condition.
+- `inertialAmbience`: the effective `inertial-ambience` configuration.
+- `ambientSounds`: the scene's ambient sources (`id`, `src`, `positionWorld`,
+  `gain`, `refDistance`); empty in scenes without any.
 - `scene`: the scene `id`, `staticModels` (glTF path and world matrix),
   `rigFixedModels` (glTF path and matrix relative to the rig), and `motion`
   (the component moving the rig and its settings). Together with the
@@ -151,6 +154,12 @@ downloads `optical-flow-<ISO date>.json`. It is built by `session-recorder.ts`
   enabled, else empty: `lagRotationVectorDeg` (the source's lag, rig frame, rotation mode),
   `offsetRigM` (the source's offset, rig frame, translation mode), `sourcePositionRig`,
   `sourcePositionHead` and `lagFraction`, keyed by `sceneTimeMs` (see `inertial-sound.md`).
+- `inertialAmbienceSamples[]`: one per frame while the inertial ambience is
+  enabled, else empty: `lagRotationVectorDeg` and `lagFraction`, keyed by
+  `sceneTimeMs` (see `inertial-ambience.md`).
+- `ambientSoundSamples[]`: one per frame with playing ambient sources, in every
+  condition: per source `anchoredHead` and `heardHead` (head frame), keyed by
+  `sceneTimeMs`.
 - `frames[]`, one per rendered frame:
   - `timeMs` (since recording start), `sceneTimeMs`, `deltaMs`, `xrPresenting`
   - `sceneState`: scene-specific state (`pathTimeSec` in Mountain Flight; speed,
