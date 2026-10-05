@@ -1,12 +1,13 @@
 # Test scenes
 
-A test scene is the world and the way the rig moves through it. Three exist:
+A test scene is the world and the way the rig moves through it. Four exist:
 
 | id | label | rig motion |
 |---|---|---|
 | `mountain-flight` | Mountain Flight | `tour-flight`: automatic helicopter flight along a scripted path over a mountain landscape; the user can only look around |
 | `car-race` | Car Race | `car-drive`: the user drives a formula car around a race track, seen from the cockpit |
 | `city-drive` | City Drive | `straight-drive`: the formula car stands in a city street, accelerates straight ahead from standstill for a fixed time, then jumps back to the start, in a loop; the user can only look around |
+| `big-room` | Big Room | `room-loop` (placeholder): the rig flies a horizontal ellipse through a furnished loft; the user can only look around |
 
 Every mitigation works in every scene: the mitigation systems only read the
 rig (the camera's parent, `src/rig.ts`) and know nothing about scenes.
@@ -50,7 +51,7 @@ Code lives in `src/scenes/`.
 - **`rig-markup.ts`**: `rigMarkup(attributes)`, the rig every scene uses: the
   camera and the right controller whose B button cycles the condition.
   Scenes only choose where the rig sits and what moves it.
-- **`mountain-flight.ts`**, **`car-race.ts`**, **`city-drive.ts`**: the scenes.
+- **`mountain-flight.ts`**, **`car-race.ts`**, **`city-drive.ts`**, **`big-room.ts`**: the scenes.
 - **`formula-car.ts`**: the formula car with the rig on its seat, shared by
   Car Race and City Drive; the scene only chooses the component moving `#car`.
 - **`url-selection.ts`**, **`scene-select.ts`**: see above.
@@ -212,6 +213,19 @@ the road (Shift + right-click) and copy its location from the N panel → View �
 and to a heading. It is still a placeholder (the origin, facing +Y).
 
 Logged per frame: `cycle`, `distanceM`, `speedMps`. Reference space: `local`.
+
+## Big Room
+
+`public/big_room.glb` is "Big Room" by Francesco Coldesina
+(https://sketchfab.com/3d-models/big-room-0b5da073be88481091dbef7e55f1d180),
+CC-BY-4.0. Its units are about 2 cm, so `src/scenes/big-room.ts` scales it by
+0.02 (ceiling ≈ 3.1 m) and centres it horizontally on the origin.
+
+The motion is a placeholder until a drone flight replaces it: `room-loop`
+(`src/big-room/room-loop.ts`) flies the rig at 1.6 m around a 3 m × 2 m
+ellipse, facing along the path, one lap per 30 s. It announces its first
+placement as a rig teleport. Logged per frame: `pathTimeSec`. Reference
+space: `local`.
 
 ## Mountain Flight
 

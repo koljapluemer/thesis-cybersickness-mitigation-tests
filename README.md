@@ -25,6 +25,7 @@ head-locked HUD rotation indicators have since been removed.
 | `src/scenes/` | Test scene registry (`SCENES`), the shared rig markup, scene and condition selection through the URL, and the scene select. See `doc/scenes.md`. |
 | `src/tour-flight.ts` | `tour-flight` component that flies the camera rig along the path (Mountain Flight). |
 | `src/city-drive/` | City Drive: `straight-drive` component (hold, constant acceleration, jump back) and the start pose in Blender coordinates. See `doc/scenes.md`. |
+| `src/big-room/` | Big Room: placeholder `room-loop` component flying the rig around an ellipse. See `doc/scenes.md`. |
 | `src/car-race/` | Car Race: `car-drive` component, car physics (dynamic bicycle model), wall collision and keyboard / thumbstick input. See `doc/scenes.md`. |
 | `src/rig-fixed.ts` | `rig-fixed` component: puts geometry that moves with the rig (the car body) on its own render layer, which the flow meter measures separately. |
 | `src/optical-flow/` | Live optical flow measurement (`optical-flow` A-Frame system) and session recorder. See `doc/optical-flow.md`. |
