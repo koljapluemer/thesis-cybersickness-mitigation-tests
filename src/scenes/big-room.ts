@@ -1,5 +1,7 @@
-import '../big-room/room-loop';
-import type { RoomLoopComponent } from '../big-room/room-loop';
+import '../big-room/drone-flight';
+import type { DroneFlightComponent } from '../big-room/drone-flight';
+import type { MinSnapLoop } from '../big-room/min-snap';
+import { WAYPOINTS } from '../big-room/waypoints';
 import { rigMarkup } from './rig-markup';
 import { queryEntity, worldModel, type SceneDefinition } from './scene-definition';
 
@@ -11,7 +13,16 @@ const ROOM_SRC = '/big_room.glb';
  */
 const ROOM_TRANSFORM = { position: '-10.18 0 5.84', scale: 0.02 };
 
-/** A flight through a furnished loft. The rig motion is a placeholder loop. */
+/** Waypoint markers, shown only while the scene is paused (in the inspector). */
+const waypointMarkup = ([x, y, z]: readonly number[]) => `
+  <a-entity
+    class="drone-waypoint"
+    position="${x} ${y} ${z}"
+    geometry="primitive: sphere; radius: 0.08"
+    material="color: #ff8800; shader: flat"
+  ></a-entity>`;
+
+/** A drone flight through a furnished loft, on a loop through editable waypoints. */
 export const BIG_ROOM = {
   id: 'big-room',
   label: 'Big Room',
@@ -29,21 +40,32 @@ export const BIG_ROOM = {
       scale="${ROOM_TRANSFORM.scale} ${ROOM_TRANSFORM.scale} ${ROOM_TRANSFORM.scale}"
     ></a-entity>
 
-    ${rigMarkup('room-loop="center: 0 1.6 0; radiusX: 3; radiusZ: 2; periodS: 30"')}
+    <a-entity id="drone-waypoints">${WAYPOINTS.map(waypointMarkup).join('')}
+    </a-entity>
+
+    ${rigMarkup('drone-flight="waypoints: #drone-waypoints"')}
   `,
 
   recording(sceneEl) {
     const roomEl = queryEntity(sceneEl, '#room');
-    const loop = queryEntity(sceneEl, '#rig').components['room-loop'] as unknown as RoomLoopComponent;
+    const flight = queryEntity(sceneEl, '#rig').components['drone-flight'] as unknown as DroneFlightComponent;
 
     return {
-      describe: () => ({
-        id: 'big-room',
-        staticModels: [worldModel(roomEl, ROOM_SRC)],
-        rigFixedModels: [],
-        motion: { component: 'room-loop', config: { ...loop.data } },
-      }),
-      frameState: () => ({ pathTimeSec: loop.pathTimeSec }),
+      describe: () => {
+        const { cruiseSpeed, maxSpeed, maxAcceleration, tiltCoupling } = flight.data;
+        const loop = flight.loop as MinSnapLoop;
+
+        return {
+          id: 'big-room',
+          staticModels: [worldModel(roomEl, ROOM_SRC)],
+          rigFixedModels: [],
+          motion: {
+            component: 'drone-flight',
+            config: { cruiseSpeed, maxSpeed, maxAcceleration, tiltCoupling, waypoints: loop.points, segmentDurations: loop.durations },
+          },
+        };
+      },
+      frameState: () => ({ pathTimeSec: flight.pathTimeSec, speedMps: flight.speedMps }),
     };
   },
-} as const satisfies SceneDefinition<'big-room', { pathTimeSec: number }>;
+} as const satisfies SceneDefinition<'big-room', { pathTimeSec: number; speedMps: number }>;

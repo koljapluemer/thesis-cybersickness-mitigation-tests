@@ -7,7 +7,7 @@ A test scene is the world and the way the rig moves through it. Four exist:
 | `mountain-flight` | Mountain Flight | `tour-flight`: automatic helicopter flight along a scripted path over a mountain landscape; the user can only look around |
 | `car-race` | Car Race | `car-drive`: the user drives a formula car around a race track, seen from the cockpit |
 | `city-drive` | City Drive | `straight-drive`: the formula car stands in a city street, accelerates straight ahead from standstill for a fixed time, then jumps back to the start, in a loop; the user can only look around |
-| `big-room` | Big Room | `room-loop` (placeholder): the rig flies a horizontal ellipse through a furnished loft; the user can only look around |
+| `big-room` | Big Room | `drone-flight`: a drone flies a closed minimum-snap loop through editable waypoints in a furnished loft, leaning like a quadcopter; the user can only look around |
 
 Every mitigation works in every scene: the mitigation systems only read the
 rig (the camera's parent, `src/rig.ts`) and know nothing about scenes.
@@ -221,11 +221,54 @@ Logged per frame: `cycle`, `distanceM`, `speedMps`. Reference space: `local`.
 CC-BY-4.0. Its units are about 2 cm, so `src/scenes/big-room.ts` scales it by
 0.02 (ceiling ≈ 3.1 m) and centres it horizontally on the origin.
 
-The motion is a placeholder until a drone flight replaces it: `room-loop`
-(`src/big-room/room-loop.ts`) flies the rig at 1.6 m around a 3 m × 2 m
-ellipse, facing along the path, one lap per 30 s. It announces its first
-placement as a rig teleport. Logged per frame: `pathTimeSec`. Reference
+Code lives in `src/big-room/`.
+
+### Motion
+
+`drone-flight` (`drone-flight.ts`, on `#rig`) flies a closed loop through the
+waypoints, the child entities of `#drone-waypoints`, in DOM order and from
+the last back to the first.
+
+- **Path** (`min-snap.ts`): the minimum-snap curve through the waypoints, a
+  septic polynomial per segment that is continuous up to the 6th derivative
+  at every waypoint, including the seam. Snap is what a quadcopter's motor
+  commands follow, so acceleration and jerk never jump, unlike the Catmull-Rom
+  tour of Mountain Flight.
+- **Timing**: each segment first gets its length / `cruiseSpeed` (2.5 m/s).
+  Then the whole loop is slowed uniformly until the peak speed is at most
+  `maxSpeed` (4 m/s) and the peak acceleration at most `maxAcceleration`
+  (4 m/s²). Uniform time scaling keeps the path's shape.
+- **Attitude**: the rig faces its horizontal velocity. With `tiltCoupling` 1
+  it also leans as a quadcopter must: its up axis is the thrust axis a + g, so
+  it tips forward when speeding up, back when braking and banks into turns.
+  With 0 it only yaws and the horizon stays level; values in between slerp.
+  The head moves freely on top, as in every scene.
+- The heading needs horizontal motion: if the horizontal speed falls below
+  0.2 m/s anywhere (e.g. two waypoints stacked vertically), the plan is
+  rejected.
+
+The rig teleport is announced on the first placement and after every
+re-plan. Logged per frame: `pathTimeSec`, `speedMps`. `describe()` logs the
+limits, `tiltCoupling`, the waypoints and the segment durations. Reference
 space: `local`.
+
+### Editing the waypoints
+
+`WAYPOINTS` in `src/big-room/waypoints.ts` holds the loop, in world
+coordinates (m, y up; the room's floor is at y = 0).
+
+1. Open the A-Frame inspector with ctrl + alt + i. It pauses the scene, and
+   while paused the waypoints (orange spheres) and the planned path (orange
+   line) are shown. Otherwise they are hidden, so they are never seen in the
+   study or measured by the optical flow.
+2. Drag a waypoint, or edit its position. Each change re-plans and redraws the
+   path. You can add, delete or reorder children of `#drone-waypoints`. A new
+   waypoint is planned where it is created, so move it into place.
+3. Close the inspector (ctrl + alt + i) to fly the new loop.
+4. Inspector edits are lost on reload. After each change, `drone-flight` logs
+   the `WAYPOINTS` literal to the console: paste it into `waypoints.ts`.
+
+A rejected edit is logged as an error and the previous loop kept.
 
 ## Mountain Flight
 
