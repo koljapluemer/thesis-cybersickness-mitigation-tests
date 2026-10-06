@@ -1,19 +1,26 @@
-"""Animation of the ambient sound sources: where they are and where they are heard.
+"""Animation of the ambient sound sources: where and how loud they are heard.
 
-Every playing `ambient-sound` source is drawn twice, in its own colour: a ring
-where its object is (anchored) and a dot where it is played from (heard), with
-a line between them and a fading trail of the heard position. Under the
-`inertial-ambience-*` conditions the two differ by the inertial sphere's lag
-rotation about the head; in every other condition they coincide. Panels:
+Every playing `ambient-sound` source is a dot in its own colour, where it is
+played from (heard), with a fading trail. What else is drawn follows what the
+condition's `inertial-ambience` changes:
+
+    effect: rotation   the sources are turned off their objects by the inertial
+                       sphere's lag: each object is marked as well (ring, square
+                       on the map) and linked to its dot
+    effect: loudness   the sources stay at their objects and their levels are
+                       tilted: each dot's size follows its level, and a timeline
+                       shows each source's level change in dB
+    disabled           the sources are where their objects are, at their level
+
+Panels:
 
     view       the scene ray-cast from the logged pose of the first view (as in
                `replay_session.py`), with the sources projected into it; sources
                outside the view are triangles at the edge, pointing their way
     head frame directions of the sources on the unit sphere around the listener
-    room       the room from above with the drone path, the rig's heading and the
-               sources, heard ones placed at their heard position in the world
-    timelines  the lag rotation (rig frame) and each source's angle between
-               anchored and heard direction
+    room       the room from above with the drone path, the rig's and head's
+               heading and the sources
+    timelines  the signed lag φ (rig frame); under `loudness` each source's level change
 
 See `../doc/inertial-ambience.md`.
 
@@ -67,10 +74,6 @@ def map_xy(points: np.ndarray) -> np.ndarray:
 
 def unit(vectors: np.ndarray) -> np.ndarray:
     return vectors / np.linalg.norm(vectors, axis=-1, keepdims=True)
-
-
-def angle_between_deg(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return np.degrees(np.arctan2(np.linalg.norm(np.cross(a, b), axis=-1), np.einsum("...i,...i", a, b)))
 
 
 class ViewProjector:
@@ -145,19 +148,24 @@ def main() -> None:
     count = len(samples)
     anchored_head = np.full((count, len(ids), 3), np.nan)
     heard_head = np.full((count, len(ids), 3), np.nan)
+    gain_db = np.full((count, len(ids)), np.nan)
     for index, sample in enumerate(samples):
         for source in sample["sources"]:
             column = ids.index(source["id"])
             anchored_head[index, column] = source["anchoredHead"]
             heard_head[index, column] = source["heardHead"]
+            gain_db[index, column] = source["gainDb"]
     poses = [head_pose(frames[index]) for index in frame_of]
     head_position = np.array([position for position, _ in poses])
     head_rotation = np.array([rotation for _, rotation in poses])
     heard_world = head_position[:, None] + np.einsum("nij,nsj->nsi", head_rotation, heard_head)
-    deviation = angle_between_deg(anchored_head, heard_head)
+    # Relative amplitude: the dots' diameters scale with it (±6 dB = ×2 / ×½).
+    level = 10 ** (gain_db / 20)
     rig_position = np.array([mat4(frame["rigMatrixWorld"])[:3, 3] for frame in frames])
 
     config = log["inertialAmbience"]
+    moves = config["enabled"] and config["effect"] == "rotation"
+    tilts = config["enabled"] and config["effect"] == "loudness"
     lag_samples = log["inertialAmbienceSamples"]
     lag_t = session_time_sec(log, [sample["sceneTimeMs"] for sample in lag_samples]) if lag_samples else np.empty(0)
     lag = np.array([sample["lagRotationVectorDeg"] for sample in lag_samples]) if lag_samples else np.empty((0, 3))
@@ -169,13 +177,15 @@ def main() -> None:
     end = t[-1] if args.end is None else args.end
     video_times = np.arange(start, end, 1 / args.fps)
 
-    figure = plt.figure(figsize=(18, 10), dpi=100)
-    grid = figure.add_gridspec(3, 3, height_ratios=(3.2, 1, 1), width_ratios=(1.5, 1, 1))
+    figure = plt.figure(figsize=(18, 11 if tilts else 10), dpi=100)
+    grid = figure.add_gridspec(3 if tilts else 2, 3, height_ratios=(3.2, 1, 1) if tilts else (3.2, 1), width_ratios=(1.5, 1, 1))
     view_axis = figure.add_subplot(grid[0, 0])
     sphere_axis = figure.add_subplot(grid[0, 1], projection="3d")
     map_axis = figure.add_subplot(grid[0, 2])
     lag_axis = figure.add_subplot(grid[1, :])
-    deviation_axis = figure.add_subplot(grid[2, :], sharex=lag_axis)
+    timelines = [lag_axis]
+    if tilts:
+        timelines.append(figure.add_subplot(grid[2, :], sharex=lag_axis))
     figure.subplots_adjust(left=0.05, right=0.98, top=0.9, bottom=0.06, wspace=0.12, hspace=0.3)
 
     # View: the image is replaced per frame; overlays per source.
@@ -187,9 +197,10 @@ def main() -> None:
     view_axis.set_xlim(0, width)
     view_axis.set_ylim(height, 0)
     view_axis.set_axis_off()
-    view_axis.set_title("view (first eye): ring = object, dot = heard", fontsize=10)
+    key = ": ring = object, dot = heard" if moves else ": dot size = level" if tilts else ""
+    view_axis.set_title(f"view (first eye){key}", fontsize=10)
 
-    draw_sphere(sphere_axis, "head frame: directions as heard", 1)
+    draw_sphere(sphere_axis, f"head frame{key}", 1)
 
     if len(plan):
         map_axis.scatter(plan[:, 0], plan[:, 1], s=0.2, color="grey", alpha=0.25, linewidths=0)
@@ -200,8 +211,9 @@ def main() -> None:
     rig_heading = map_axis.quiver([0], [0], [0], [0], color="black", angles="xy", scale_units="xy", scale=1, width=0.006)
     head_heading = map_axis.quiver([0], [0], [0], [0], color="grey", angles="xy", scale_units="xy", scale=1, width=0.004)
     anchored_map = map_xy(anchored_world)
-    for index, source_id in enumerate(ids):
-        map_axis.plot(*anchored_map[index], "s", color=colours[source_id], markersize=9, markeredgecolor="black")
+    if moves:
+        for index, source_id in enumerate(ids):
+            map_axis.plot(*anchored_map[index], "s", color=colours[source_id], markersize=9, markeredgecolor="black")
     extent_points = np.concatenate([plan, path, anchored_map]) if len(plan) else np.concatenate([path, anchored_map])
     low, high = extent_points.min(axis=0) - 0.5, extent_points.max(axis=0) + 0.5
     map_axis.set_xlim(low[0], high[0])
@@ -209,7 +221,8 @@ def main() -> None:
     map_axis.set_aspect("equal")
     map_axis.set_xlabel("x (m)")
     map_axis.set_ylabel("−z (m)")
-    map_axis.set_title("room from above: square = object, dot = heard", fontsize=10)
+    map_key = ": square = object, dot = heard" if moves else key
+    map_axis.set_title(f"room from above{map_key}", fontsize=10)
 
     class SourceArtists:
         def __init__(self, column: int, source_id: str) -> None:
@@ -241,6 +254,7 @@ def main() -> None:
             if not valid[-1]:
                 self.hide()
                 return
+            size = level[last, column]
 
             # View.
             pixels, inside, outward = projector.project(np.vstack([anchored_world[column], heard[valid]]))
@@ -251,9 +265,11 @@ def main() -> None:
             self.view_trail.set_segments(segments[keep])
             self.view_trail.set_color(segment_colours[keep])
             anchored_pixel, heard_pixel = pixels[0], pixels[-1]
-            self.view_anchored.set_data([anchored_pixel[0]] if inside[0] else [], [anchored_pixel[1]] if inside[0] else [])
+            if moves:
+                self.view_anchored.set_data([anchored_pixel[0]] if inside[0] else [], [anchored_pixel[1]] if inside[0] else [])
             self.view_heard.set_data([heard_pixel[0]] if inside[-1] else [], [heard_pixel[1]] if inside[-1] else [])
-            if inside[0] and inside[-1]:
+            self.view_heard.set_markersize(8 * size)
+            if moves and inside[0] and inside[-1]:
                 self.view_link.set_data([anchored_pixel[0], heard_pixel[0]], [anchored_pixel[1], heard_pixel[1]])
             else:
                 self.view_link.set_data([], [])
@@ -270,17 +286,21 @@ def main() -> None:
             self.sphere_trail.set_segments(segments)
             self.sphere_trail.set_color(segment_colours)
             heard_direction = heard_directions[-1]
-            self.sphere_anchored.set_data_3d(*anchored_direction[:, None])
             self.sphere_heard.set_data_3d(*heard_direction[:, None])
-            self.sphere_link.set_data_3d(*np.stack([anchored_direction, heard_direction], axis=1))
+            self.sphere_heard.set_markersize(7 * size)
+            if moves:
+                self.sphere_anchored.set_data_3d(*anchored_direction[:, None])
+                self.sphere_link.set_data_3d(*np.stack([anchored_direction, heard_direction], axis=1))
 
-            # Room map.
+            # Room map: heard positions only leave the objects when the sources are turned.
             heard_map = map_xy(heard[valid])
-            segments, segment_colours = trail_segments(heard_map, 0, len(heard_map) - 1, self.colour)
-            self.map_trail.set_segments(segments)
-            self.map_trail.set_color(segment_colours)
             self.map_heard.set_data([heard_map[-1, 0]], [heard_map[-1, 1]])
-            self.map_link.set_data([anchored_map[column, 0], heard_map[-1, 0]], [anchored_map[column, 1], heard_map[-1, 1]])
+            self.map_heard.set_markersize(9 * size)
+            if moves:
+                segments, segment_colours = trail_segments(heard_map, 0, len(heard_map) - 1, self.colour)
+                self.map_trail.set_segments(segments)
+                self.map_trail.set_color(segment_colours)
+                self.map_link.set_data([anchored_map[column, 0], heard_map[-1, 0]], [anchored_map[column, 1], heard_map[-1, 1]])
 
         def hide(self) -> None:
             for artist in (self.view_link, self.view_anchored, self.view_heard, self.view_edge, self.map_link, self.map_heard):
@@ -298,21 +318,26 @@ def main() -> None:
             lag_axis.plot(lag_t, lag[:, index], linewidth=1, label=name)
         lag_axis.legend(loc="upper right", fontsize=8)
     else:
-        lag_axis.text(0.5, 0.5, "inertial ambience disabled: heard = anchored", transform=lag_axis.transAxes, ha="center", va="center")
-    lag_axis.set_ylabel("lag rotation\n(deg, rig frame)")
-    lag_axis.tick_params(labelbottom=False)
-    for column, source_id in enumerate(ids):
-        deviation_axis.plot(t, deviation[:, column], linewidth=1, color=colours[source_id], label=source_id)
-    deviation_axis.set_ylabel("object → heard\n(deg)")
-    deviation_axis.set_xlabel("session time (s)")
-    deviation_axis.legend(loc="upper right", fontsize=8)
-    deviation_axis.set_xlim(start, end)
-    cursors = [axis.axvline(start, color="black", linewidth=1) for axis in (lag_axis, deviation_axis)]
-    spans = [axis.axvspan(start, start, color="grey", alpha=0.15) for axis in (lag_axis, deviation_axis)]
+        lag_axis.text(0.5, 0.5, "inertial ambience disabled", transform=lag_axis.transAxes, ha="center", va="center")
+    lag_axis.set_ylabel("signed lag φ\n(deg, rig frame)")
+    if tilts:
+        gain_axis = timelines[1]
+        for column, source_id in enumerate(ids):
+            gain_axis.plot(t, gain_db[:, column], linewidth=1, color=colours[source_id], label=source_id)
+        gain_axis.set_ylabel("level change\n(dB)")
+        gain_axis.legend(loc="upper right", fontsize=8)
+    for axis in timelines[:-1]:
+        axis.tick_params(labelbottom=False)
+    timelines[-1].set_xlabel("session time (s)")
+    lag_axis.set_xlim(start, end)
+    cursors = [axis.axvline(start, color="black", linewidth=1) for axis in timelines]
+    spans = [axis.axvspan(start, start, color="grey", alpha=0.15) for axis in timelines]
 
     timing = f"T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}"
     if config["enabled"]:
-        model = f"{config['swing']}, {timing}, ×{config['lagGain']:g}, max {config['maxLagDeg']:g}°"
+        model = f"{config['effect']}, {config['swing']}, {timing}, ×{config['lagGain']:g}, max {config['maxLagDeg']:g}°"
+        if config["effect"] == "loudness":
+            model += f", ±{config['maxGainDb']:g} dB"
     else:
         model = "inertial ambience off"
     title = f"{log['condition']}   {model}"

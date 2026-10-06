@@ -9,8 +9,8 @@ import { getAudio } from './audio-system';
 
 const THREE = AFRAME.THREE;
 
-/** Time constant of the source position changes, in seconds. */
-const POSITION_SMOOTHING_SEC = 0.02;
+/** Time constant of the source position and tilt gain changes, in seconds. */
+const PLACEMENT_SMOOTHING_SEC = 0.02;
 /** Time constant of the fade in, in seconds. */
 const FADE_IN_SEC = 0.5;
 
@@ -26,6 +26,9 @@ export type AmbientSoundData = {
 type AmbientGraph = {
   source: AudioBufferSourceNode;
   panner: PannerNode;
+  /** `inertial-ambience`'s loudness tilt; 1 in every other condition. */
+  tilt: GainNode;
+  /** Fades in to the component's `gain`. */
   master: GainNode;
 };
 
@@ -56,6 +59,8 @@ export type AmbientSourceSample = {
   anchoredHead: [number, number, number];
   /** Where it is played from, after `inertial-ambience`'s rotation: head coordinates, in metres. */
   heardHead: [number, number, number];
+  /** Level change from `inertial-ambience`'s loudness tilt, in dB; 0 in every other condition. */
+  gainDb: number;
 };
 
 export type AmbientSoundSample = {
@@ -77,10 +82,12 @@ type AmbientSoundInternals = AmbientSoundSystem & {
   scratch: {
     offset: Vector3;
     anchored: Vector3;
+    directionRig: Vector3;
     headPosition: Vector3;
     headQuaternion: Quaternion;
     headInverse: Quaternion;
     rigQuaternion: Quaternion;
+    rigInverse: Quaternion;
     toHeard: Quaternion;
     scale: Vector3;
     discard: Vector3;
@@ -112,6 +119,12 @@ function toArray(vector: Vector3): [number, number, number] {
  *     heard = q_head⁻¹ · q_rig · L · q_rig⁻¹ · (p_source − p_head)
  *
  * With L the identity (every other condition), that is where the source is.
+ * Its level is changed by `inertial-ambience`'s loudness tilt u (rig
+ * coordinates, dB), through a gain stage of its own:
+ *
+ *     gain_dB = u · normalize(q_rig⁻¹ · (p_source − p_head))
+ *
+ * With u zero (every condition but the loudness ones), that is 0 dB.
  *
  * Systems `tock` after all components, in registration order. This module
  * imports `inertial-ambience`, which imports `rig-kinematics`, so both
@@ -125,10 +138,12 @@ AFRAME.registerSystem('ambient-sound', {
     this.scratch = {
       offset: new THREE.Vector3(),
       anchored: new THREE.Vector3(),
+      directionRig: new THREE.Vector3(),
       headPosition: new THREE.Vector3(),
       headQuaternion: new THREE.Quaternion(),
       headInverse: new THREE.Quaternion(),
       rigQuaternion: new THREE.Quaternion(),
+      rigInverse: new THREE.Quaternion(),
       toHeard: new THREE.Quaternion(),
       scale: new THREE.Vector3(),
       discard: new THREE.Vector3(),
@@ -151,16 +166,15 @@ AFRAME.registerSystem('ambient-sound', {
       return;
     }
 
-    const { offset, anchored, headPosition, headQuaternion, headInverse, rigQuaternion, toHeard, scale, discard } = this.scratch;
+    const { offset, anchored, directionRig, headPosition, headQuaternion, headInverse, rigQuaternion, rigInverse, toHeard, scale, discard } =
+      this.scratch;
+    const inertialAmbience = getInertialAmbience(this.sceneEl);
     headMatrixWorld(this.sceneEl).decompose(headPosition, headQuaternion, scale);
     rig.matrixWorld.decompose(discard, rigQuaternion, scale);
     headInverse.copy(headQuaternion).invert();
+    rigInverse.copy(rigQuaternion).invert();
     // q_head⁻¹ · q_rig · L · q_rig⁻¹
-    toHeard
-      .copy(headInverse)
-      .multiply(rigQuaternion)
-      .multiply(getInertialAmbience(this.sceneEl).lagRotation)
-      .multiply(rigQuaternion.invert());
+    toHeard.copy(headInverse).multiply(rigQuaternion).multiply(inertialAmbience.lagRotation).multiply(rigInverse);
 
     const now = context.currentTime;
     const sources: AmbientSourceSample[] = [];
@@ -174,14 +188,16 @@ AFRAME.registerSystem('ambient-sound', {
 
       component.el.object3D.getWorldPosition(offset).sub(headPosition);
       anchored.copy(offset).applyQuaternion(headInverse);
+      const gainDb = inertialAmbience.loudnessTiltDb.dot(directionRig.copy(offset).applyQuaternion(rigInverse).normalize());
       offset.applyQuaternion(toHeard);
 
-      const { panner } = component.graph;
-      panner.positionX.setTargetAtTime(offset.x, now, POSITION_SMOOTHING_SEC);
-      panner.positionY.setTargetAtTime(offset.y, now, POSITION_SMOOTHING_SEC);
-      panner.positionZ.setTargetAtTime(offset.z, now, POSITION_SMOOTHING_SEC);
+      const { panner, tilt } = component.graph;
+      tilt.gain.setTargetAtTime(10 ** (gainDb / 20), now, PLACEMENT_SMOOTHING_SEC);
+      panner.positionX.setTargetAtTime(offset.x, now, PLACEMENT_SMOOTHING_SEC);
+      panner.positionY.setTargetAtTime(offset.y, now, PLACEMENT_SMOOTHING_SEC);
+      panner.positionZ.setTargetAtTime(offset.z, now, PLACEMENT_SMOOTHING_SEC);
 
-      sources.push({ id: component.el.id, anchoredHead: toArray(anchored), heardHead: toArray(offset) });
+      sources.push({ id: component.el.id, anchoredHead: toArray(anchored), heardHead: toArray(offset), gainDb });
     });
 
     if (sources.length > 0) {
@@ -239,15 +255,16 @@ AFRAME.registerComponent('ambient-sound', {
       refDistance: this.data.refDistance,
       rolloffFactor: 1,
     });
+    const tilt = new GainNode(context, { gain: 1 });
     const master = new GainNode(context, { gain: 0 });
 
-    source.connect(panner).connect(master).connect(context.destination);
-    source.addEventListener('ended', () => [source, panner, master].forEach((node) => node.disconnect()));
+    source.connect(panner).connect(tilt).connect(master).connect(context.destination);
+    source.addEventListener('ended', () => [source, panner, tilt, master].forEach((node) => node.disconnect()));
     // Random start, so the loop point does not fall at the same moment every session.
     source.start(0, Math.random() * buffer.duration);
     master.gain.setTargetAtTime(this.data.gain, context.currentTime, FADE_IN_SEC);
 
-    this.graph = { source, panner, master };
+    this.graph = { source, panner, tilt, master };
   },
 
   remove(this: AmbientSoundComponent) {

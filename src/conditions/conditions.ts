@@ -104,11 +104,13 @@ export const CONDITIONS = [
       'inertial-ambience': NO_INERTIAL_AMBIENCE,
     },
   },
-  // Inertial ambience conditions: the scene's own ambient sounds swing with the
-  // inertial sphere's lag (doc/inertial-ambience.md). Only the Big Room has
-  // ambient sounds; elsewhere these play nothing. Tune the swing here, per
-  // condition, e.g. `lagGain: 3, maxLagDeg: 60, naturalPeriodMs: 6000`; the
-  // defaults are in the schema of `src/inertial-ambience/inertial-ambience-system.ts`.
+  // Inertial ambience conditions: the scene's own ambient sounds follow the
+  // inertial sphere's lag (doc/inertial-ambience.md), turned about the head
+  // (`effect: 'rotation'`, the default) or tilted in level (`effect: 'loudness'`).
+  // Only the Big Room has ambient sounds; elsewhere these play nothing. Tune them
+  // here, per condition, e.g. `lagGain: 3, maxLagDeg: 60, naturalPeriodMs: 6000`
+  // or `maxGainDb: 9`; the defaults are in the schema of
+  // `src/inertial-ambience/inertial-ambience-system.ts`.
   {
     id: 'inertial-ambience-against-acceleration',
     label: 'Inertial Ambience (Against Acceleration)',
@@ -125,6 +127,24 @@ export const CONDITIONS = [
       'turn-cues': { output: 'none' },
       'inertial-sound': NO_INERTIAL_SOUND,
       'inertial-ambience': { enabled: true, swing: 'with-acceleration' },
+    },
+  },
+  {
+    id: 'inertial-ambience-loudness-against-acceleration',
+    label: 'Inertial Ambience Loudness (Against Acceleration)',
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': { enabled: true, effect: 'loudness', swing: 'against-acceleration' },
+    },
+  },
+  {
+    id: 'inertial-ambience-loudness-with-acceleration',
+    label: 'Inertial Ambience Loudness (With Acceleration)',
+    mitigations: {
+      'turn-cues': { output: 'none' },
+      'inertial-sound': NO_INERTIAL_SOUND,
+      'inertial-ambience': { enabled: true, effect: 'loudness', swing: 'with-acceleration' },
     },
   },
 ] as const satisfies readonly Condition[];

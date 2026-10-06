@@ -26,5 +26,6 @@ uv run ambient_sound.py path/to/optical-flow-<date>.json [--out DIR] [--fps N] [
 
 For Big Room logs: animates every ambient sound source as where its object is and where it is heard,
 in the scene ray-cast from the logged view, on the head-frame sphere and on a map of the room from above,
-with timelines of the inertial ambience's lag, into `ambient-sound.mp4`. Under the `inertial-ambience-*`
-conditions the two differ by the lag rotation; otherwise they coincide. See `../doc/inertial-ambience.md`.
+with timelines of the inertial ambience's lag and of each source's level change, into `ambient-sound.mp4`.
+Under the rotating `inertial-ambience-*` conditions the two differ by the lag rotation; under the
+`inertial-ambience-loudness-*` conditions they coincide and the levels are tilted; otherwise they coincide at 0 dB. See `../doc/inertial-ambience.md`.

@@ -8,6 +8,9 @@ import { fromRotationVector } from '../rotation';
 
 const THREE = AFRAME.THREE;
 
+/** The rig's forward axis, in rig coordinates. */
+const RIG_FORWARD = new THREE.Vector3(0, 0, -1);
+
 /**
  * Sense of the ambient sources' rotation relative to the sphere's lag, which
  * settles at −α_rig/ωₙ² (against the rig's angular acceleration):
@@ -17,9 +20,18 @@ const THREE = AFRAME.THREE;
  */
 export type AmbienceSwing = 'against-acceleration' | 'with-acceleration';
 
+/**
+ * What the signed lag φ does to the ambient sources: `rotation` turns their
+ * directions about the head by exp(φ); `loudness` leaves them where their
+ * objects are and tilts their levels towards where φ turns the rig's forward
+ * axis (`loudnessTiltDb`).
+ */
+export type AmbienceEffect = 'rotation' | 'loudness';
+
 export type InertialAmbienceData = {
   enabled: boolean;
   swing: AmbienceSwing;
+  effect: AmbienceEffect;
   /** Undamped natural period of the sphere's spring, in milliseconds. */
   naturalPeriodMs: number;
   /** 1 = critically damped. */
@@ -28,6 +40,8 @@ export type InertialAmbienceData = {
   lagGain: number;
   /** The sources' rotation is clamped to this angle, in degrees. */
   maxLagDeg: number;
+  /** `loudness` only: level change of a source exactly to the side of the rig's forward axis at full lag, in dB. */
+  maxGainDb: number;
 };
 
 export type InertialAmbienceSample = {
@@ -35,13 +49,16 @@ export type InertialAmbienceSample = {
   /** Frame interval the sphere was stepped over, in milliseconds. */
   deltaMs: number;
   /**
-   * Rotation applied to the ambient sources about the head: the sphere's lag
-   * times `lagGain`, negated under `with-acceleration`, as a rotation vector in
-   * rig coordinates, in degrees (x pitch, y yaw, z roll; y > 0 = sounds turned left).
+   * The signed lag φ: the sphere's lag times `lagGain`, negated under
+   * `with-acceleration`, clamped to `maxLagDeg`, as a rotation vector in rig
+   * coordinates, in degrees (x pitch, y yaw, z roll; y > 0 = turned left). Under
+   * `rotation` the sources are turned by it; under `loudness` it sets the tilt.
    */
   lagRotationVectorDeg: [number, number, number];
-  /** The rotation's angle over `maxLagDeg`, 0..1. */
+  /** φ's angle over `maxLagDeg`, 0..1. */
   lagFraction: number;
+  /** `loudnessTiltDb` (rig frame, dB); zero under `rotation`. */
+  loudnessTiltDb: [number, number, number];
 };
 
 export type InertialAmbienceSystem = System<InertialAmbienceData> & {
@@ -51,6 +68,12 @@ export type InertialAmbienceSystem = System<InertialAmbienceData> & {
    * `rig-kinematics` has run its `tock`.
    */
   readonly lagRotation: Readonly<Quaternion>;
+  /**
+   * Level tilt u of the ambient sources, in rig coordinates, in dB: a source in
+   * unit direction d̂ from the head (rig coordinates) plays at u · d̂ dB. Zero
+   * while disabled and under `rotation`. Current for this frame like `lagRotation`.
+   */
+  readonly loudnessTiltDb: Readonly<Vector3>;
   /** Called every frame while enabled. */
   onSample(listener: (sample: InertialAmbienceSample) => void): Unsubscribe;
 };
@@ -58,38 +81,48 @@ export type InertialAmbienceSystem = System<InertialAmbienceData> & {
 type InertialAmbienceInternals = InertialAmbienceSystem & {
   sceneEl: Scene;
   lagRotation: Quaternion;
+  loudnessTiltDb: Vector3;
   listeners: Set<(sample: InertialAmbienceSample) => void>;
   unsubscribeKinematics: Unsubscribe | null;
-  scratch: { lag: Vector3; rigQuaternion: Quaternion; rigAngularVelocity: Vector3 };
+  scratch: { lag: Vector3; lagDeg: Vector3; rigQuaternion: Quaternion; rigAngularVelocity: Vector3 };
   step(sphere: InertialSphere, sample: RigKinematicsSample, aligned: boolean): void;
   teardown(): void;
 };
 
 /**
- * Inertial ambience: the scene's ambient sounds (`ambient-sound`) are turned
- * about the head by `lagGain` times the lag of an `InertialSphere`, the same
+ * Inertial ambience: the scene's ambient sounds (`ambient-sound`) follow the
+ * signed lag φ = s · `lagGain` · θ of an `InertialSphere`, the same
  * rig-angular-acceleration model as the `inertial-sound` mitigation, instead of
- * moving a dedicated motor sound. At rest and in steady turns the sources sit
- * where their objects are. Driven by `rig-kinematics`; configured per
- * experimental condition through the schema. The `ambient-sound` system reads
- * `lagRotation` and places the sources.
+ * moving a dedicated motor sound. Under `rotation` they are turned about the
+ * head by exp(φ); under `loudness` they stay put and their levels tilt by
+ *
+ *     u = (maxGainDb / maxLagDeg) · (φ × f),   f = rig forward (0, 0, −1),
+ *
+ * a dipole towards where φ turns the forward axis (the small-angle form of
+ * exp(φ)·f − f). At rest and in steady turns φ = 0. Driven by `rig-kinematics`;
+ * configured per experimental condition through the schema. The `ambient-sound`
+ * system reads `lagRotation` and `loudnessTiltDb` and places the sources.
  */
 AFRAME.registerSystem('inertial-ambience', {
   schema: {
     enabled: { type: 'boolean', default: false },
     swing: { type: 'string', default: 'against-acceleration', oneOf: ['against-acceleration', 'with-acceleration'] },
+    effect: { type: 'string', default: 'rotation', oneOf: ['rotation', 'loudness'] },
     naturalPeriodMs: { type: 'number', default: 8000 },
     dampingRatio: { type: 'number', default: 1 },
     lagGain: { type: 'number', default: 2 },
     maxLagDeg: { type: 'number', default: 45 },
+    maxGainDb: { type: 'number', default: 6 },
   },
 
   init(this: InertialAmbienceInternals) {
     this.lagRotation = new THREE.Quaternion();
+    this.loudnessTiltDb = new THREE.Vector3();
     this.listeners = new Set();
     this.unsubscribeKinematics = null;
     this.scratch = {
       lag: new THREE.Vector3(),
+      lagDeg: new THREE.Vector3(),
       rigQuaternion: new THREE.Quaternion(),
       rigAngularVelocity: new THREE.Vector3(),
     };
@@ -113,7 +146,7 @@ AFRAME.registerSystem('inertial-ambience', {
   },
 
   step(this: InertialAmbienceInternals, sphere: InertialSphere, sample: RigKinematicsSample, aligned: boolean) {
-    const { lag, rigQuaternion, rigAngularVelocity } = this.scratch;
+    const { lag, lagDeg, rigQuaternion, rigAngularVelocity } = this.scratch;
     rigQuaternion.fromArray(sample.rigQuaternion);
     rigAngularVelocity.fromArray(sample.angularVelocityRadPerSec);
 
@@ -125,14 +158,23 @@ AFRAME.registerSystem('inertial-ambience', {
 
     const sign = this.data.swing === 'with-acceleration' ? -1 : 1;
     lag.copy(sphere.lag).multiplyScalar(sign * this.data.lagGain);
-    fromRotationVector(lag, this.lagRotation);
+    lagDeg.copy(lag).multiplyScalar(THREE.MathUtils.RAD2DEG);
 
-    const toDeg = THREE.MathUtils.radToDeg;
+    if (this.data.effect === 'loudness') {
+      this.lagRotation.identity();
+      this.loudnessTiltDb.crossVectors(lagDeg, RIG_FORWARD).multiplyScalar(this.data.maxGainDb / this.data.maxLagDeg);
+    } else {
+      fromRotationVector(lag, this.lagRotation);
+      this.loudnessTiltDb.set(0, 0, 0);
+    }
+
+    const tilt = this.loudnessTiltDb;
     const logged: InertialAmbienceSample = {
       sceneTimeMs: sample.sceneTimeMs,
       deltaMs: sample.frameDeltaMs,
-      lagRotationVectorDeg: [toDeg(lag.x), toDeg(lag.y), toDeg(lag.z)],
-      lagFraction: Math.min(1, toDeg(lag.length()) / this.data.maxLagDeg),
+      lagRotationVectorDeg: [lagDeg.x, lagDeg.y, lagDeg.z],
+      lagFraction: Math.min(1, lagDeg.length() / this.data.maxLagDeg),
+      loudnessTiltDb: [tilt.x, tilt.y, tilt.z],
     };
     this.listeners.forEach((listener) => listener(logged));
   },
@@ -141,6 +183,7 @@ AFRAME.registerSystem('inertial-ambience', {
     this.unsubscribeKinematics?.();
     this.unsubscribeKinematics = null;
     this.lagRotation.identity();
+    this.loudnessTiltDb.set(0, 0, 0);
   },
 
   onSample(this: InertialAmbienceInternals, listener: (sample: InertialAmbienceSample) => void): Unsubscribe {

@@ -21,6 +21,8 @@ link with it starts in that condition (see `scenes.md`).
 | `inertial-motor-sound-linear` | Inertial Motor Sound (Linear Acceleration) | detected and logged, not played | on: motor sound straight below the user, shifted against the rig's linear acceleration (incl. centripetal), constant timbre; rotation alone does not move it | off |
 | `inertial-ambience-against-acceleration` | Inertial Ambience (Against Acceleration) | detected and logged, not played | off | on: the scene's ambient sounds turn about the head by the inertial sphere's lag, in its sense (over-rotating at a turn onset; `inertial-ambience.md`). Big Room only |
 | `inertial-ambience-with-acceleration` | Inertial Ambience (With Acceleration) | detected and logged, not played | off | on: as above, turned the opposite way (carried along with the rig at a turn onset). Big Room only |
+| `inertial-ambience-loudness-against-acceleration` | Inertial Ambience Loudness (Against Acceleration) | detected and logged, not played | off | on: the ambient sounds stay at their objects; their levels tilt by the same lag, towards the outside of a turn at its onset. Big Room only |
+| `inertial-ambience-loudness-with-acceleration` | Inertial Ambience Loudness (With Acceleration) | detected and logged, not played | off | on: as above, tilted the opposite way (towards the inside of a turn at its onset). Big Room only |
 
 ## Architecture
 

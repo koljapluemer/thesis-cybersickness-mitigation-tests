@@ -1,12 +1,17 @@
 # Inertial ambience
 
 Audio countermeasure without an added sound: the scene's own ambient sources
-(Big Room: fridge, birds, construction site, ventilation) are turned about the
-listener's head by the lag of the same inertial sphere the
-[inertial motor sound](inertial-sound.md) uses. At rest and in steady turns
-every source sits where its object is. When the rig's rotation accelerates, the
-whole auditory scene swings off the visible one, and settles back once the
-acceleration ends.
+(Big Room: fridge, birds, construction site, ventilation) follow the lag of the
+same inertial sphere the [inertial motor sound](inertial-sound.md) uses. At rest
+and in steady turns every source sits where its object is, at its own level.
+When the rig's rotation accelerates, the lag acts in one of two ways (`effect`):
+
+- `rotation`: the whole auditory scene swings off the visible one about the
+  listener's head.
+- `loudness`: every source stays at its object, and the levels tilt towards one
+  side (see [Effect: loudness](#effect-loudness)).
+
+Both settle back once the acceleration ends.
 
 Only the Big Room has ambient sources. In other scenes these conditions play
 nothing and log no ambient samples.
@@ -22,11 +27,13 @@ steps the sphere on every `rig-kinematics` sample and resets it to the rig on th
 first sample, after a restart (teleport, paused frame) and after frames over
 100 ms (`isIntegrable` in `rig-kinematics-system.ts`).
 
-The rotation applied to the sources is
+Both effects start from the signed lag
 
-    L = exp(s · lagGain · θ),   clamped to maxLagDeg,
+    φ = s · lagGain · θ,   clamped to maxLagDeg,
 
-as a rotation in rig coordinates, with s = +1 or −1 from `swing` (below).
+a rotation vector in rig coordinates, with s = +1 or −1 from `swing` (below).
+Under `rotation` the sources are turned by L = exp(φ); under `loudness` L is the
+identity and φ sets the level tilt.
 
 ## Placement
 
@@ -48,23 +55,48 @@ The L used in a frame is stepped from that frame's rig pose. A recorded log
 confirms it: the logged heard positions match the logged poses and lag of the
 same `sceneTimeMs` to floating-point precision.
 
-## The two conditions: `swing`
+## Effect: loudness
+
+Under `effect: 'loudness'` the sources keep their heard position (heard =
+anchored), and each gets a level change in its own gain stage
+(`panner → tilt → master`, so the fade-in on `master` is untouched):
+
+    u      = (maxGainDb / maxLagDeg) · (φ × f),   f = rig forward (0, 0, −1)
+    gain_dB = u · d̂
+
+with d̂ the source's unit direction from the head, in **rig** coordinates. The
+tilt u (`loudnessTiltDb` of the `inertial-ambience` system) is the small-angle
+form of exp(φ)·f − f: it points to where φ turns the rig's forward axis, and
+sources on that side get louder, sources on the other side quieter. A pure
+dipole:
+
+- Under yaw it is a left/right tilt. Sources straight ahead or behind keep
+  their level; roll (φ ∥ f) changes nothing; pitch tilts up/down.
+- |u| ≤ `maxGainDb`: a source exactly to the side gets ±`maxGainDb` at full lag.
+- In rig coordinates, so turning the head does not change the levels (the
+  vestibular system senses head turns; only the rig's rotation is in conflict).
+- Not normalized: the summed level may drift slightly. The Big Room's four
+  sources surround the room, so the tilt mostly redistributes level.
+
+## The four conditions: `effect` × `swing`
 
 The sphere's lag settles at −α/ωₙ², against the angular acceleration.
 
-| condition | `swing` | s | at the onset of a left turn |
-|---|---|---|---|
-| `inertial-ambience-against-acceleration` | `against-acceleration` | +1 | sounds turn right, further than the visible room turns past the rig: the auditory scene over-rotates. Same sense as the motor sound's swing. |
-| `inertial-ambience-with-acceleration` | `with-acceleration` | −1 | sounds turn left: they are carried along with the rig and trail the visible room. |
+| condition | `effect` | `swing` | s | at the onset of a left turn |
+|---|---|---|---|---|
+| `inertial-ambience-against-acceleration` | `rotation` | `against-acceleration` | +1 | sounds turn right, further than the visible room turns past the rig: the auditory scene over-rotates. Same sense as the motor sound's swing. |
+| `inertial-ambience-with-acceleration` | `rotation` | `with-acceleration` | −1 | sounds turn left: they are carried along with the rig and trail the visible room. |
+| `inertial-ambience-loudness-against-acceleration` | `loudness` | `against-acceleration` | +1 | sources on the right get louder, those on the left quieter: the level lags to the outside of the turn. |
+| `inertial-ambience-loudness-with-acceleration` | `loudness` | `with-acceleration` | −1 | sources on the left get louder: the level leads into the turn. |
 
-When the turn ends (deceleration), both swing to the other side before settling.
-In both conditions turn cues are not played (`output: 'none'`) and the motor
+When the turn ends (deceleration), all swing to the other side before settling.
+In all four conditions turn cues are not played (`output: 'none'`) and the motor
 sound is off.
 
 ## Configuration
 
 **Where to set it:** per condition, in the `'inertial-ambience'` object of the
-two conditions in `src/conditions/conditions.ts`, e.g.
+four conditions in `src/conditions/conditions.ts`, e.g.
 
 ```ts
 {
@@ -78,7 +110,9 @@ two conditions in `src/conditions/conditions.ts`, e.g.
 },
 ```
 
-Change both conditions alike if the two signs should stay comparable. A
+Change the conditions of an effect alike if the two signs should stay
+comparable, and keep the timing of both effects alike if they should be
+compared with each other. A
 property a condition leaves out takes the default from the `schema` of the
 `inertial-ambience` system in
 `src/inertial-ambience/inertial-ambience-system.ts`. Change a default only if
@@ -88,11 +122,13 @@ it should apply to every condition. Every other condition sets
 | property | default | effect |
 |---|---|---|
 | `enabled` | false | off in every other condition |
-| `swing` | `against-acceleration` | sign of the rotation, see above |
+| `swing` | `against-acceleration` | sign s of φ, see above |
+| `effect` | `rotation` | `rotation` (turn the sources) or `loudness` (tilt their levels) |
 | `naturalPeriodMs` | 8000 | undamped period of the sphere's spring. **Timing and size:** a longer period swings further (lag ∝ T²) and returns more slowly |
 | `dampingRatio` | 1 | 1 = critically damped, no wobble of its own; < 1 overshoots |
-| `lagGain` | 2 | rotation = sphere lag × this; scales the size without changing the timing. > 0 |
-| `maxLagDeg` | 45 | clamp of the rotation's angle. At the clamp the sphere rides along with the rig |
+| `lagGain` | 2 | φ = sphere lag × this; scales the size without changing the timing. > 0 |
+| `maxLagDeg` | 45 | clamp of φ's angle. At the clamp the sphere rides along with the rig |
+| `maxGainDb` | 6 | `loudness` only: level change of a source exactly to the side at full lag (φ at `maxLagDeg`). Untuned; the loudness JND is about 1 dB |
 
 **Untuned.** The defaults came from the tour, whose turns peak around
 40 °/s². The drone is much more agile. In the first recorded Big Room session,
@@ -112,27 +148,31 @@ sphere lag:
 | 1500 | 2° | 7° | 12° | 18° |
 | 1000 | 1° | 4° | 6° | 11° |
 
-Multiply by `lagGain` for the rotation. For example, `naturalPeriodMs: 2000`
+Multiply by `lagGain` for φ. For example, `naturalPeriodMs: 2000`
 with `lagGain: 2` keeps the rotation mostly within 25–40° and returns within
 about 2 s.
 
-**The mismatch is the stimulus.** Every degree of rotation moves the sources
-off their visible objects (the fridge's hum no longer comes from the fridge).
-Large rotations are not just a stronger cue but a new audio–visual conflict.
+**The mismatch is the stimulus** (`rotation`). Every degree of rotation moves
+the sources off their visible objects (the fridge's hum no longer comes from the
+fridge). Large rotations are not just a stronger cue but a new audio–visual
+conflict. `loudness` avoids that conflict, but a level change has no built-in
+meaning of motion; a louder fridge may just be heard as a louder fridge.
 
 ## Logging
 
-The session log (format version 10) stores:
+The session log (format version 11) stores:
 
 - `inertialAmbience`: the effective configuration.
 - `ambientSounds`: the scene's sources (`id`, `src`, `positionWorld`, `gain`,
   `refDistance`). Empty in scenes without any.
 - `inertialAmbienceSamples[]`, one per frame while enabled:
-  `lagRotationVectorDeg` (L as a rotation vector, rig frame, x pitch / y yaw /
-  z roll, y > 0 = sounds turned left) and `lagFraction` (angle / `maxLagDeg`).
+  `lagRotationVectorDeg` (φ, rig frame, x pitch / y yaw / z roll, y > 0 =
+  turned left), `lagFraction` (angle / `maxLagDeg`) and `loudnessTiltDb`
+  (u, rig frame, dB; zero under `rotation`).
 - `ambientSoundSamples[]`, one per frame with playing sources, **in every
   condition**: per source `anchoredHead` (where its object is) and `heardHead`
-  (where it is played from), both in head coordinates, in metres.
+  (where it is played from), both in head coordinates, in metres, and `gainDb`
+  (its level change; 0 except under `loudness`).
 
 ## Analysis
 
@@ -143,11 +183,13 @@ The session log (format version 10) stores:
   - the head-frame directions on the unit sphere;
   - the room from above, with the drone path, the rig's heading and the heard
     positions placed in the world;
-  - timelines of L and of each source's angle between its object and where it
-    is heard.
+  - timelines of φ, of each source's angle between its object and where it
+    is heard, and of each source's level change in dB.
 
-  The script works for any Big Room log; in the control the two markers coincide.
-- `analysis/replay_session.py` shows L in the last panel of `timeseries.png`.
+  The script works for any Big Room log; in the control and under `loudness`
+  the two markers coincide.
+- `analysis/replay_session.py` shows φ in the last panel of `timeseries.png`,
+  and under `loudness` the tilt's left/right component on a second axis.
 
 ## Limitations
 
@@ -158,5 +200,8 @@ The session log (format version 10) stores:
   Chromium's HRTF is weak.
 - **No room acoustics:** the sources are dry point sources. Rotation changes
   only their direction, not any reverberation, since there is none.
+- **Loudness and distance:** a level change can also be heard as the source
+  coming closer or moving away; the 1/distance rolloff is the scene's other
+  level cue, and the tilt acts on top of it as a ratio.
 - An ambisonic alternative that rotates a rendered sound field is sketched, not
   implemented, in [ambisonic-field-rotation.md](ambisonic-field-rotation.md).

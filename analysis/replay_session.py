@@ -443,19 +443,29 @@ def plot_inertial_sound(log: dict, axis: plt.Axes) -> None:
 
 
 def plot_inertial_ambience(log: dict, axis: plt.Axes) -> None:
-    """Rotation of the ambient sources about the head (sphere lag × lagGain, signed by `swing`; rig frame, +left, deg)."""
+    """Signed lag of the ambient sources (sphere lag × lagGain, signed by `swing`; rig frame, +left, deg).
+
+    Under `effect: rotation` the sources are turned by it; under `loudness` their levels are tilted,
+    and the tilt's left/right component (dB, +right) is drawn on a second axis.
+    """
     config = log["inertialAmbience"]
     samples = log["inertialAmbienceSamples"]
     timing = f"T={config['naturalPeriodMs'] / 1000:g}s, ζ={config['dampingRatio']:g}"
-    axis.set_ylabel(f"inertial ambience (deg)\n{config['swing']}, {timing}, ×{config['lagGain']:g}")
+    axis.set_ylabel(f"inertial ambience (deg)\n{config['effect']}, {config['swing']}, {timing}, ×{config['lagGain']:g}")
     if not samples or not log["frames"]:
         axis.text(0.5, 0.5, "inertial ambience disabled", transform=axis.transAxes, ha="center", va="center")
         return
     t = session_time_sec(log, [sample["sceneTimeMs"] for sample in samples])
     lag = np.array([sample["lagRotationVectorDeg"] for sample in samples])
     for index, name in enumerate(("pitch (x)", "yaw (y)", "roll (z)")):
-        axis.plot(t, lag[:, index], label=f"rotation {name}")
-    axis.legend(loc="upper right")
+        axis.plot(t, lag[:, index], label=f"lag {name}")
+    axis.legend(loc="upper left")
+    if config["effect"] == "loudness":
+        tilt_axis = axis.twinx()
+        tilt = np.array([sample["loudnessTiltDb"] for sample in samples])
+        tilt_axis.plot(t, tilt[:, 0], color="black", linewidth=1, label="tilt right (x)")
+        tilt_axis.set_ylabel(f"loudness tilt (dB), max ±{config['maxGainDb']:g}")
+        tilt_axis.legend(loc="upper right")
 
 
 def main() -> None:
