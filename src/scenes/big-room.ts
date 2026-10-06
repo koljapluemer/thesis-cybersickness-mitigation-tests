@@ -24,7 +24,7 @@ const ROOM_TRANSFORM = { position: '-10.18 0 5.84', scale: 0.02 };
  */
 const AMBIENT_SOUNDS = [
   { id: 'fridge-sound', src: '/refrigerator-sound-effect.mp3', position: '4.1 0.4 3.7', gain: 0.4, refDistance: 1 },
-  { id: 'bird-sound', src: '/morning-birds-singing.mp3', position: '-1.7 3 -7', gain: 0.6, refDistance: 4 },
+  { id: 'bird-sound', src: '/morning-birds-singing.mp3', position: '-1.7 4 -7', gain: 0.6, refDistance: 4 },
   {
     id: 'construction-sound',
     src: '/exterior-of-construction-site-with-some-background-noises.mp3',

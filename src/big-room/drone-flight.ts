@@ -155,9 +155,9 @@ function replan(component: DroneFlightComponent, force: boolean): void {
 AFRAME.registerComponent('drone-flight', {
   schema: {
     waypoints: { type: 'selector' },
-    cruiseSpeed: { type: 'number', default: 2.5 },
+    cruiseSpeed: { type: 'number', default: 1.8 },
     maxSpeed: { type: 'number', default: 4 },
-    maxAcceleration: { type: 'number', default: 4 },
+    maxAcceleration: { type: 'number', default: 5 },
     tiltCoupling: { type: 'number', default: 1 },
   },
 
